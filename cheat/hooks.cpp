@@ -33,44 +33,37 @@ namespace C4pt0r::Hooks
     // ---- State ----------------------------------------------------------
     static PresentFn       oPresent        = nullptr;
     static ResizeBuffersFn oResizeBuffers  = nullptr;
-    static WNDPROC         oWndProc        = nullptr;
     static bool            s_ImGuiInited   = false;
     static void*           s_PresentTarget = nullptr;
     static void*           s_ResizeTarget  = nullptr;
 
-    // ---- WndProc hook ---------------------------------------------------
-    static LRESULT CALLBACK HookedWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
+    // NOTE: no WndProc subclassing — SetWindowLongPtr(GWLP_WNDPROC) is the
+    // single most-checked thing FiveM's adhesive validates, and a foreign
+    // window proc on grcWindow triggers the early-exit trap the moment an
+    // input message arrives. All menu input is fed manually instead.
+    static bool s_KeyDown[256] = {};
+
+    static bool KeyPressed(int vk)
     {
-        // Menu toggle
-        if (msg == WM_KEYDOWN && wParam == static_cast<WPARAM>(g_Menu.toggleKey)) {
-            g_Menu.isOpen = !g_Menu.isOpen;
-            Log::Write("Menu toggled: %s", g_Menu.isOpen ? "OPEN" : "CLOSED");
-            return 0;
-        }
+        bool down = (GetAsyncKeyState(vk) & 0x8000) != 0;
+        bool pressed = down && !s_KeyDown[vk & 0xFF];
+        s_KeyDown[vk & 0xFF] = down;
+        return pressed;
+    }
 
-        // Panic key: END -> unload
-        if (msg == WM_KEYDOWN && wParam == VK_END) {
-            g_Running = false;
-            return 0;
-        }
+    // Feed ImGui mouse/button state without touching the window proc
+    static void FeedImGuiInput()
+    {
+        ImGuiIO& io = ImGui::GetIO();
 
-        // Forward input to ImGui when menu is open
-        if (g_Menu.isOpen && s_ImGuiInited) {
-            if (ImGui_ImplWin32_WndProcHandler(hWnd, msg, wParam, lParam))
-                return 0;
-            // Block mouse from reaching the game while menu is open
-            if (msg >= WM_MOUSEFIRST && msg <= WM_MOUSELAST)
-                return 0;
-            // Block keyboard (except our toggle/panic keys already handled above)
-            if (msg == WM_KEYDOWN || msg == WM_KEYUP || msg == WM_CHAR ||
-                msg == WM_SYSKEYDOWN || msg == WM_SYSKEYUP)
-                return 0;
-            // Block raw input
-            if (msg == WM_INPUT)
-                return 0;
-        }
-
-        return CallWindowProcW(oWndProc, hWnd, msg, wParam, lParam);
+        POINT pt{};
+        GetCursorPos(&pt);
+        if (g_GameWindow) ScreenToClient(g_GameWindow, &pt);
+        io.AddMouseSourceEvent(ImGuiMouseSource_Mouse);
+        io.AddMousePosEvent(static_cast<float>(pt.x), static_cast<float>(pt.y));
+        io.AddMouseButtonEvent(0, (GetAsyncKeyState(VK_LBUTTON) & 0x8000) != 0);
+        io.AddMouseButtonEvent(1, (GetAsyncKeyState(VK_RBUTTON) & 0x8000) != 0);
+        io.AddMouseButtonEvent(2, (GetAsyncKeyState(VK_MBUTTON) & 0x8000) != 0);
     }
 
     // ---- ResizeBuffers hook ---------------------------------------------
@@ -148,11 +141,6 @@ namespace C4pt0r::Hooks
 
             Menu::SetupStyle();
 
-            // Subclass WndProc
-            oWndProc = reinterpret_cast<WNDPROC>(
-                SetWindowLongPtrW(g_GameWindow, GWLP_WNDPROC,
-                                  reinterpret_cast<LONG_PTR>(HookedWndProc)));
-
             s_ImGuiInited = true;
             Log::Write("ImGui initialized. Menu ready (F9 to toggle).");
         }
@@ -163,8 +151,21 @@ namespace C4pt0r::Hooks
         if (sc != g_SwapChain || !g_DeviceContext || !g_RenderTarget)
             return oPresent(sc, syncInterval, flags);
 
+        // Key polling (edge-detected) — replaces the WndProc key handling
+        if (KeyPressed(g_Menu.toggleKey)) {
+            g_Menu.isOpen = !g_Menu.isOpen;
+            Log::Write("Menu toggled: %s", g_Menu.isOpen ? "OPEN" : "CLOSED");
+        }
+        if (KeyPressed(VK_END)) {
+            Log::Write("Panic key pressed — unloading");
+            g_Running = false;
+            return oPresent(sc, syncInterval, flags);
+        }
+
         // ---- Render frame with SEH protection ----
         __try {
+            FeedImGuiInput();
+
             ImGui_ImplDX11_NewFrame();
             ImGui_ImplWin32_NewFrame();
             ImGui::NewFrame();
@@ -320,12 +321,6 @@ namespace C4pt0r::Hooks
         // Disable and remove all MinHook hooks
         MH_DisableHook(MH_ALL_HOOKS);
         MH_Uninitialize();
-
-        // Restore WndProc
-        if (oWndProc && g_GameWindow) {
-            SetWindowLongPtrW(g_GameWindow, GWLP_WNDPROC,
-                              reinterpret_cast<LONG_PTR>(oWndProc));
-        }
 
         // Tear down ImGui
         if (s_ImGuiInited) {

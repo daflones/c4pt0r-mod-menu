@@ -11,8 +11,59 @@
 
 #include <thread>
 #include <chrono>
+#include <winternl.h>
 
 using namespace C4pt0r;
+
+// ---- Module hiding ------------------------------------------------------
+//  LoadLibrary injection leaves us in the PEB module lists — the first
+//  thing any integrity check enumerates. Unlink our LDR_DATA_TABLE_ENTRY
+//  from all three lists; keep the neighbors so we can relink before unload.
+static PLIST_ENTRY s_SavedLinks[3]  = {};
+static PLIST_ENTRY s_SavedBlink[3]  = {};
+static bool        s_Unlinked       = false;
+
+static void HideModule(HMODULE hMod)
+{
+    PPEB peb = reinterpret_cast<PPEB>(__readgsqword(0x60));
+    if (!peb || !peb->Ldr) return;
+    PPEB_LDR_DATA ldr = peb->Ldr;
+
+    PLIST_ENTRY heads[3] = {
+        &ldr->InLoadOrderModuleList,
+        &ldr->InMemoryOrderModuleList,
+        &ldr->InInitializationOrderModuleList,
+    };
+    const int linkOff[3] = { 0x00, 0x10, 0x20 };   // offsets in LDR entry
+
+    for (int k = 0; k < 3; ++k) {
+        for (PLIST_ENTRY e = heads[k]->Flink; e != heads[k]; e = e->Flink) {
+            uintptr_t entry = reinterpret_cast<uintptr_t>(e) - linkOff[k];
+            PVOID base = *reinterpret_cast<PVOID*>(entry + 0x30); // DllBase
+            if (base == hMod) {
+                s_SavedLinks[k] = e;
+                s_SavedBlink[k] = e->Blink;
+                e->Blink->Flink = e->Flink;
+                e->Flink->Blink = e->Blink;
+                break;
+            }
+        }
+    }
+    s_Unlinked = true;
+}
+
+static void RelinkModule()
+{
+    if (!s_Unlinked) return;
+    for (int k = 0; k < 3; ++k) {
+        PLIST_ENTRY e = s_SavedLinks[k];
+        if (e && e->Blink) {
+            e->Blink->Flink = e;
+            e->Flink->Blink = e;
+        }
+    }
+    s_Unlinked = false;
+}
 
 // ---- Main cheat thread --------------------------------------------------
 static void MainThread(HMODULE hModule)
@@ -20,6 +71,10 @@ static void MainThread(HMODULE hModule)
     Log::Init();
     Log::Write("C4pt0r Cheats starting...");
     Log::Write("DLL loaded at 0x%p", hModule);
+
+    // Drop off the PEB module lists before doing anything else
+    HideModule(hModule);
+    Log::Write("Module unlinked from PEB lists.");
 
     // Wait for game window
     Log::Write("Waiting for game window (grcWindow)...");
@@ -79,16 +134,21 @@ static void MainThread(HMODULE hModule)
     Log::Write("Entering main loop. F9 = menu, END = unload.");
 
     // ---- Main loop: tick features every frame ----
+    int consecutiveErrors = 0;
     while (g_Running) {
         if (nativesOk) {
             __try {
                 Features::Tick();
+                consecutiveErrors = 0;
             }
             __except (EXCEPTION_EXECUTE_HANDLER) {
-                Log::Write("EXCEPTION in Features::Tick(), code 0x%08X", GetExceptionCode());
-                // Don't spam: disable features after crash
-                nativesOk = false;
-                Log::Write("Features disabled to prevent further crashes.");
+                ++consecutiveErrors;
+                Log::Write("EXCEPTION in Features::Tick(), code 0x%08X (#%d)",
+                           GetExceptionCode(), consecutiveErrors);
+                if (consecutiveErrors >= 25) {
+                    nativesOk = false;
+                    Log::Write("Features disabled after repeated crashes.");
+                }
             }
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(16));
@@ -99,6 +159,9 @@ static void MainThread(HMODULE hModule)
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
     Hooks::Shutdown();
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    // Relink so FreeLibrary can find our LDR entry again
+    RelinkModule();
 
     Log::Write("Unloaded cleanly. Bye!");
     Log::Close();

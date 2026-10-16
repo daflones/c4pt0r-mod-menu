@@ -64,54 +64,64 @@ namespace C4pt0r::Natives
     bool CallNative(uint64_t hash, const uint64_t* args, int nargs,
                     uint64_t* ret)
     {
-        // Path A: FiveM's exported high-level invoke (does everything)
-        if (s_CallNative) {
-            FxScriptContext ctx;
-            ctx.Reset();
-            for (int i = 0; i < nargs; ++i) ctx.args[i] = args[i];
-            ctx.numArgs = nargs;
-            bool ok = s_CallNative(hash, &ctx);
-            if (ret) {
-                ret[0] = ctx.rets[0];
-                ret[1] = ctx.rets[1];
-                ret[2] = ctx.rets[2];
-                ret[3] = ctx.rets[3];
-            }
-            return ok;
-        }
-
-        // Path B: exported scrEngine::GetNativeHandler -> call raw handler
-        if (s_RageGNH) {
-            NativeHandler h = s_RageGNH(hash);
-            if (h && Memory::IsExecutable(reinterpret_cast<uintptr_t>(h))) {
-                NativeCallContext ctx;
-                for (int i = 0; i < nargs; ++i) ctx.Push(args[i]);
-                h(&ctx);
+        // FiveM converts handler faults into C++ exceptions — contain them
+        // here so a single bad call can't propagate up and kill the feature
+        // loop or the whole init.
+        try {
+            // Path A: FiveM's exported high-level invoke (does everything)
+            if (s_CallNative) {
+                FxScriptContext ctx;
+                ctx.Reset();
+                for (int i = 0; i < nargs; ++i) ctx.args[i] = args[i];
+                ctx.numArgs = nargs;
+                bool ok = s_CallNative(hash, &ctx);
                 if (ret) {
-                    const uint64_t* rv = ctx.returnValue;
-                    ret[0] = rv[0]; ret[1] = rv[1];
-                    ret[2] = rv[2]; ret[3] = rv[3];
+                    ret[0] = ctx.rets[0];
+                    ret[1] = ctx.rets[1];
+                    ret[2] = ctx.rets[2];
+                    ret[3] = ctx.rets[3];
                 }
-                return true;
+                return ok;
             }
-        }
 
-        // Path C: raw table walk (mapped hash, raw handler — likely
-        // adhesive-encrypted on this build; still try as last resort)
-        if (s_GetNativeHandler && s_NativeTable) {
-            uint64_t h2 = s_MapNative ? s_MapNative(hash) : hash;
-            NativeHandler h = s_GetNativeHandler(s_NativeTable, h2);
-            if (h && Memory::IsExecutable(reinterpret_cast<uintptr_t>(h))) {
-                NativeCallContext ctx;
-                for (int i = 0; i < nargs; ++i) ctx.Push(args[i]);
-                h(&ctx);
-                if (ret) {
-                    const uint64_t* rv = ctx.returnValue;
-                    ret[0] = rv[0]; ret[1] = rv[1];
-                    ret[2] = rv[2]; ret[3] = rv[3];
+            // Path B: exported scrEngine::GetNativeHandler -> call raw handler
+            if (s_RageGNH) {
+                NativeHandler h = s_RageGNH(hash);
+                if (h && Memory::IsExecutable(reinterpret_cast<uintptr_t>(h))) {
+                    NativeCallContext ctx;
+                    for (int i = 0; i < nargs; ++i) ctx.Push(args[i]);
+                    h(&ctx);
+                    if (ret) {
+                        const uint64_t* rv = ctx.returnValue;
+                        ret[0] = rv[0]; ret[1] = rv[1];
+                        ret[2] = rv[2]; ret[3] = rv[3];
+                    }
+                    return true;
                 }
-                return true;
             }
+
+            // Path C: raw table walk (mapped hash, raw handler — likely
+            // adhesive-encrypted on this build; still try as last resort)
+            if (s_GetNativeHandler && s_NativeTable) {
+                uint64_t h2 = s_MapNative ? s_MapNative(hash) : hash;
+                NativeHandler h = s_GetNativeHandler(s_NativeTable, h2);
+                if (h && Memory::IsExecutable(reinterpret_cast<uintptr_t>(h))) {
+                    NativeCallContext ctx;
+                    for (int i = 0; i < nargs; ++i) ctx.Push(args[i]);
+                    h(&ctx);
+                    if (ret) {
+                        const uint64_t* rv = ctx.returnValue;
+                        ret[0] = rv[0]; ret[1] = rv[1];
+                        ret[2] = rv[2]; ret[3] = rv[3];
+                    }
+                    return true;
+                }
+            }
+        } catch (...) {
+            static std::set<uint64_t> s_Threw;
+            if (s_Threw.insert(hash).second)
+                Log::Write("Native 0x%016llX threw — skipping it from now on.",
+                           static_cast<unsigned long long>(hash));
         }
         return false;
     }
