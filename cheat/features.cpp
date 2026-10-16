@@ -99,11 +99,14 @@ namespace C4pt0r::Features
 
         if (g_Player.noclip) {
             s_WasNoclip = true;
-            Natives::FreezeEntityPosition(ped, true);
+
+            // Velocity-driven noclip: NO FreezeEntityPosition +
+            // SetEntityCoordsNoOffset loop — teleporting a ped every tick
+            // fights the physics engine and crashes the game process.
+            // Collision off + gravity off + velocity = smooth fly-through.
             Natives::SetEntityCollision(ped, false, false);
             Natives::SetEntityHasGravity(ped, false);
 
-            // Get camera forward direction
             Vec3 camRot = Natives::GetGameplayCamRot();
             float pitch = camRot.x * DEG2RAD;
             float yaw   = camRot.z * DEG2RAD;
@@ -118,37 +121,22 @@ namespace C4pt0r::Features
             right.y = sinf(yaw);
             right.z = 0;
 
-            Vec3 pos = Natives::GetEntityCoords(ped);
             float speed = g_Player.noclipSpeed;
+            Vec3 vel;
 
-            // W/S
-            if (GetAsyncKeyState('W') & 0x8000) {
-                pos = pos + forward * speed;
-            }
-            if (GetAsyncKeyState('S') & 0x8000) {
-                pos = pos - forward * speed;
-            }
-            // A/D
-            if (GetAsyncKeyState('A') & 0x8000) {
-                pos = pos - right * speed;
-            }
-            if (GetAsyncKeyState('D') & 0x8000) {
-                pos = pos + right * speed;
-            }
-            // Space / Ctrl (up / down)
-            if (GetAsyncKeyState(VK_SPACE) & 0x8000) {
-                pos.z += speed;
-            }
-            if (GetAsyncKeyState(VK_CONTROL) & 0x8000) {
-                pos.z -= speed;
-            }
+            if (GetAsyncKeyState('W') & 0x8000)         vel = vel + forward * speed;
+            if (GetAsyncKeyState('S') & 0x8000)         vel = vel - forward * speed;
+            if (GetAsyncKeyState('A') & 0x8000)         vel = vel - right * speed;
+            if (GetAsyncKeyState('D') & 0x8000)         vel = vel + right * speed;
+            if (GetAsyncKeyState(VK_SPACE) & 0x8000)    vel.z += speed;
+            if (GetAsyncKeyState(VK_CONTROL) & 0x8000)  vel.z -= speed;
 
-            Natives::SetEntityCoordsNoOffset(ped, pos.x, pos.y, pos.z);
+            Natives::SetEntityVelocity(ped, vel.x, vel.y, vel.z);
         } else if (s_WasNoclip) {
             // Restore physics when noclip is turned off
-            Natives::FreezeEntityPosition(ped, false);
             Natives::SetEntityCollision(ped, true, true);
             Natives::SetEntityHasGravity(ped, true);
+            Natives::SetEntityVelocity(ped, 0.f, 0.f, 0.f);
             s_WasNoclip = false;
         }
     }

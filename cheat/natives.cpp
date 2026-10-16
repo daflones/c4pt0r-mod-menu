@@ -386,6 +386,14 @@ namespace C4pt0r::Natives
         a[2] = keepPhysics ? 1 : 0;
         CallNative(Hash::SET_ENTITY_COLLISION, a, 3, nullptr);
     }
+    void SetEntityVelocity(int entity, float x, float y, float z) {
+        uint64_t a[4];
+        *reinterpret_cast<int*>  (&a[0]) = entity;
+        *reinterpret_cast<float*>(&a[1]) = x;
+        *reinterpret_cast<float*>(&a[2]) = y;
+        *reinterpret_cast<float*>(&a[3]) = z;
+        CallNative(Hash::SET_ENTITY_VELOCITY, a, 4, nullptr);
+    }
     void SetEntityHasGravity(int entity, bool toggle) {
         uint64_t a[2];
         *reinterpret_cast<int*>(&a[0]) = entity;

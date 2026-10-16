@@ -19,6 +19,9 @@ using namespace C4pt0r;
 //  LoadLibrary injection leaves us in the PEB module lists — the first
 //  thing any integrity check enumerates. Unlink our LDR_DATA_TABLE_ENTRY
 //  from all three lists; keep the neighbors so we can relink before unload.
+//
+//  Newer SDKs strip _PEB_LDR_DATA down to InMemoryOrderModuleList only —
+//  use raw offsets into the real layout instead.
 static PLIST_ENTRY s_SavedLinks[3]  = {};
 static PLIST_ENTRY s_SavedBlink[3]  = {};
 static bool        s_Unlinked       = false;
@@ -27,12 +30,18 @@ static void HideModule(HMODULE hMod)
 {
     PPEB peb = reinterpret_cast<PPEB>(__readgsqword(0x60));
     if (!peb || !peb->Ldr) return;
-    PPEB_LDR_DATA ldr = peb->Ldr;
 
+    // PEB_LDR_DATA (real): Length(4) Initialized(1) pad(3) SsHandle(8)
+    //   InLoadOrderModuleList        +0x10
+    //   InMemoryOrderModuleList      +0x20
+    //   InInitializationOrderModule  +0x30
     PLIST_ENTRY heads[3] = {
-        &ldr->InLoadOrderModuleList,
-        &ldr->InMemoryOrderModuleList,
-        &ldr->InInitializationOrderModuleList,
+        reinterpret_cast<PLIST_ENTRY>(
+            reinterpret_cast<uintptr_t>(peb->Ldr) + 0x10),
+        reinterpret_cast<PLIST_ENTRY>(
+            reinterpret_cast<uintptr_t>(peb->Ldr) + 0x20),
+        reinterpret_cast<PLIST_ENTRY>(
+            reinterpret_cast<uintptr_t>(peb->Ldr) + 0x30),
     };
     const int linkOff[3] = { 0x00, 0x10, 0x20 };   // offsets in LDR entry
 

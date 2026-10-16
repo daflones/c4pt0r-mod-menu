@@ -213,6 +213,7 @@ namespace C4pt0r::Natives
     void         FreezeEntityPosition(int entity, bool toggle);
     void         SetEntityCollision(int entity, bool toggle, bool keepPhysics = true);
     void         SetEntityHasGravity(int entity, bool toggle);
+    void         SetEntityVelocity(int entity, float x, float y, float z);
     bool         WorldToScreen(Vec3 world, Vec2& screen);
 
     // Waypoint
