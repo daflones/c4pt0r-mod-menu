@@ -53,19 +53,26 @@
       <ConformanceMode>true</ConformanceMode>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <AdditionalOptions>/utf-8 %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalIncludeDirectories>$(ProjectDir)..\cheat\deps\imgui;$(ProjectDir)..\cheat\deps\imgui\backends;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <Link>
       <SubSystem>Windows</SubSystem>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>false</GenerateDebugInformation>
-      <AdditionalDependencies>dwmapi.lib;shell32.lib;comctl32.lib;comdlg32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>d3d11.lib;dxgi.lib;dwmapi.lib;shell32.lib;comctl32.lib;comdlg32.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <EntryPointSymbol>wWinMainCRTStartup</EntryPointSymbol>
     </Link>
   </ItemDefinitionGroup>
 
   <ItemGroup>
     <ClCompile Include="main.cpp" />
+    <ClCompile Include="..\cheat\deps\imgui\imgui.cpp" />
+    <ClCompile Include="..\cheat\deps\imgui\imgui_draw.cpp" />
+    <ClCompile Include="..\cheat\deps\imgui\imgui_tables.cpp" />
+    <ClCompile Include="..\cheat\deps\imgui\imgui_widgets.cpp" />
+    <ClCompile Include="..\cheat\deps\imgui\backends\imgui_impl_win32.cpp" />
+    <ClCompile Include="..\cheat\deps\imgui\backends\imgui_impl_dx11.cpp" />
   </ItemGroup>
 
   <ItemGroup>
