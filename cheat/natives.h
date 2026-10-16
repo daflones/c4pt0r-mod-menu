@@ -168,6 +168,11 @@ namespace C4pt0r::Natives
         constexpr uint64_t GET_SELECTED_PED_WEAPON              = 0x0A6DB4965674D243;
         constexpr uint64_t SET_PED_INFINITE_AMMO_CLIP           = 0x183DADC6AA953186;
 
+        // Input / control injection
+        constexpr uint64_t IS_CONTROL_PRESSED                   = 0xF3A21BCD95725A4A;
+        constexpr uint64_t SET_CONTROL_VALUE_NEXT_FRAME         = 0xE8A25867FBA3B05E;
+        constexpr uint64_t GET_ENTITY_SPEED                     = 0xD5037BA82E12416F;
+
         // Vehicle
         constexpr uint64_t IS_PED_IN_ANY_VEHICLE                = 0x997ABD671D25CA0B;
         constexpr uint64_t GET_VEHICLE_PED_IS_IN                = 0x9A9112A0FE9A4713;
@@ -210,6 +215,13 @@ namespace C4pt0r::Natives
     void         SetGameplayCamRelativePitch(float p, float smoothSpeed = 1.0f);
     void         SetRunSprintMultiplier(int player, float mult);
     void         SetPedInfiniteAmmoClip(int ped, bool toggle);
+    float        GetEntityHeading(int entity);
+    float        GetEntitySpeed(int entity);
+    uint32_t     GetSelectedPedWeapon(int ped);
+    bool         IsControlPressed(int controlId);
+    void         PressControl(int controlId, float value = 1.0f);
+    bool         IsPedInAnyVehicle(int ped);
+    int          GetVehiclePedIsIn(int ped);
     void         FreezeEntityPosition(int entity, bool toggle);
     void         SetEntityCollision(int entity, bool toggle, bool keepPhysics = true);
     void         SetEntityHasGravity(int entity, bool toggle);

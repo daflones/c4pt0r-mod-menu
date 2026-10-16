@@ -486,6 +486,58 @@ namespace C4pt0r::Natives
         CallNative(Hash::SET_PED_INFINITE_AMMO_CLIP, a, 2, nullptr);
     }
 
+    // Inspector / macro helpers ---
+    float GetEntityHeading(int entity) {
+        uint64_t a[] = { static_cast<uint64_t>(entity) };
+        uint64_t ret[4] = {};
+        CallNative(Hash::GET_ENTITY_HEADING, a, 1, ret);
+        return *reinterpret_cast<float*>(&ret[0]);
+    }
+    float GetEntitySpeed(int entity) {
+        uint64_t a[] = { static_cast<uint64_t>(entity) };
+        uint64_t ret[4] = {};
+        CallNative(Hash::GET_ENTITY_SPEED, a, 1, ret);
+        return *reinterpret_cast<float*>(&ret[0]);
+    }
+    uint32_t GetSelectedPedWeapon(int ped) {
+        uint64_t a[] = { static_cast<uint64_t>(ped) };
+        uint64_t ret[4] = {};
+        CallNative(Hash::GET_SELECTED_PED_WEAPON, a, 1, ret);
+        return static_cast<uint32_t>(ret[0]);
+    }
+    bool IsControlPressed(int controlId) {
+        uint64_t a[2];
+        a[0] = 0;  // input group 0 = move
+        *reinterpret_cast<int*>(&a[1]) = controlId;
+        uint64_t ret[4] = {};
+        CallNative(Hash::IS_CONTROL_PRESSED, a, 2, ret);
+        return ret[0] != 0;
+    }
+    void PressControl(int controlId, float value) {
+        // SET_CONTROL_VALUE_NEXT_FRAME(group, control, value)
+        uint64_t a[3];
+        a[0] = 0;
+        *reinterpret_cast<int*>  (&a[1]) = controlId;
+        *reinterpret_cast<float*>(&a[2]) = value;
+        CallNative(Hash::SET_CONTROL_VALUE_NEXT_FRAME, a, 3, nullptr);
+    }
+    bool IsPedInAnyVehicle(int ped) {
+        uint64_t a[2];
+        *reinterpret_cast<int*>(&a[0]) = ped;
+        a[1] = 0;   // include getting in/out
+        uint64_t ret[4] = {};
+        CallNative(Hash::IS_PED_IN_ANY_VEHICLE, a, 2, ret);
+        return ret[0] != 0;
+    }
+    int GetVehiclePedIsIn(int ped) {
+        uint64_t a[2];
+        *reinterpret_cast<int*>(&a[0]) = ped;
+        a[1] = 0;
+        uint64_t ret[4] = {};
+        CallNative(Hash::GET_VEHICLE_PED_IS_IN, a, 2, ret);
+        return static_cast<int>(ret[0]);
+    }
+
     // World → screen ---
     bool WorldToScreen(Vec3 world, Vec2& screen) {
         float sx = 0, sy = 0;

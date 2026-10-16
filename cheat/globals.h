@@ -97,6 +97,42 @@ namespace C4pt0r
         bool showWatermark = true;
     };
 
+    // ------------------------------------------------- Farm / macro config
+    struct FarmConfig {
+        bool  running      = false;   // master switch for the farm loop
+        bool  hasPointA    = false;   // "coleta" marker position
+        float ax = 0, ay = 0, az = 0;
+        bool  hasPointB    = false;   // "venda" marker position
+        float bx = 0, by = 0, bz = 0;
+
+        int   keyControl   = 51;      // INPUT_CONTEXT (E) — RP jobs default
+        int   holdFrames   = 2;       // frames the key stays pressed
+        int   settleMs     = 1200;    // wait after teleport before pressing
+        int   intervalMs   = 1500;    // wait after key before next step
+        int   repeatTimes  = 0;       // 0 = forever
+        int   cyclesDone   = 0;       // progress counter
+
+        // live inspector state (written by Tick, read by menu)
+        bool  inspEnabled  = true;
+    };
+
+    // Live inspector snapshot — refreshed every tick when enabled
+    struct InspectorData {
+        int   ped        = 0;
+        int   player     = 0;
+        Vec3  pos;
+        float heading    = 0.f;
+        int   health     = 0;
+        int   armor      = 0;
+        float speed      = 0.f;
+        bool  inVehicle  = false;
+        int   vehicle    = 0;
+        uint32_t weapon  = 0;
+        char  name[64]   = {};
+        // last-pressed control ids this frame (for action capture)
+        int   pressed[8] = {};
+    };
+
     // ---------------------------------------- ESP shared data (thread-safe)
     struct PlayerESPData {
         bool  active   = false;
@@ -117,6 +153,8 @@ namespace C4pt0r
     inline PlayerConfig    g_Player;
     inline TeleportConfig  g_Teleport;
     inline MenuConfig      g_Menu;
+    inline FarmConfig      g_Farm;
+    inline InspectorData   g_Inspector;
 
     inline std::atomic<bool> g_Running{ true };
     inline HMODULE           g_Module   = nullptr;

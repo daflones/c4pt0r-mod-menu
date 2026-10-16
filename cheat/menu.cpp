@@ -1,10 +1,12 @@
 // ============================================================================
-//  C4pt0r Cheats — ImGui Menu (dark + cyan, tabbed layout)
+//  C4pt0r Cheats — ImGui Menu (sidebar layout, cyan accent)
 // ============================================================================
 
 #include "menu.h"
 #include "globals.h"
 #include "imgui.h"
+
+#include <shellapi.h>
 
 namespace C4pt0r::Menu
 {
@@ -15,9 +17,9 @@ namespace C4pt0r::Menu
         ImVec4* c       = s.Colors;
 
         // Window / child / popup
-        c[ImGuiCol_WindowBg]           = ImVec4(0.06f, 0.06f, 0.10f, 0.96f);
-        c[ImGuiCol_ChildBg]            = ImVec4(0.07f, 0.07f, 0.12f, 1.00f);
-        c[ImGuiCol_PopupBg]            = ImVec4(0.08f, 0.08f, 0.13f, 0.96f);
+        c[ImGuiCol_WindowBg]           = ImVec4(0.05f, 0.05f, 0.08f, 0.97f);
+        c[ImGuiCol_ChildBg]            = ImVec4(0.06f, 0.06f, 0.10f, 1.00f);
+        c[ImGuiCol_PopupBg]            = ImVec4(0.08f, 0.08f, 0.13f, 0.97f);
         c[ImGuiCol_Border]             = ImVec4(0.00f, 0.83f, 1.00f, 0.15f);
 
         // Headers / tabs
@@ -26,9 +28,9 @@ namespace C4pt0r::Menu
         c[ImGuiCol_HeaderActive]       = ImVec4(0.00f, 0.83f, 1.00f, 0.60f);
 
         // Buttons
-        c[ImGuiCol_Button]             = ImVec4(0.00f, 0.50f, 0.65f, 0.55f);
-        c[ImGuiCol_ButtonHovered]      = ImVec4(0.00f, 0.65f, 0.80f, 0.70f);
-        c[ImGuiCol_ButtonActive]       = ImVec4(0.00f, 0.83f, 1.00f, 0.85f);
+        c[ImGuiCol_Button]             = ImVec4(0.00f, 0.45f, 0.58f, 0.55f);
+        c[ImGuiCol_ButtonHovered]      = ImVec4(0.00f, 0.65f, 0.80f, 0.75f);
+        c[ImGuiCol_ButtonActive]       = ImVec4(0.00f, 0.83f, 1.00f, 0.90f);
 
         // Frame (sliders, inputs)
         c[ImGuiCol_FrameBg]            = ImVec4(0.10f, 0.10f, 0.16f, 0.80f);
@@ -75,29 +77,31 @@ namespace C4pt0r::Menu
         c[ImGuiCol_ResizeGripActive]   = ImVec4(0.00f, 0.83f, 1.00f, 0.80f);
 
         // Rounding & spacing
-        s.WindowRounding    = 10.0f;
-        s.ChildRounding     = 6.0f;
-        s.FrameRounding     = 5.0f;
-        s.GrabRounding      = 5.0f;
-        s.TabRounding       = 5.0f;
-        s.ScrollbarRounding = 5.0f;
-        s.PopupRounding     = 6.0f;
+        s.WindowRounding    = 12.0f;
+        s.ChildRounding     = 8.0f;
+        s.FrameRounding     = 6.0f;
+        s.GrabRounding      = 6.0f;
+        s.TabRounding       = 6.0f;
+        s.ScrollbarRounding = 8.0f;
+        s.PopupRounding     = 8.0f;
 
         s.WindowPadding     = ImVec2(14, 14);
-        s.FramePadding      = ImVec2(10, 5);
-        s.ItemSpacing       = ImVec2(10, 7);
+        s.FramePadding      = ImVec2(10, 6);
+        s.ItemSpacing       = ImVec2(10, 8);
         s.ItemInnerSpacing  = ImVec2(8, 5);
         s.WindowBorderSize  = 1.0f;
         s.FrameBorderSize   = 0.0f;
         s.TabBorderSize     = 0.0f;
         s.ScrollbarSize     = 12.0f;
-        s.GrabMinSize       = 8.0f;
+        s.GrabMinSize       = 9.0f;
     }
 
     // ---- Helpers --------------------------------------------------------
     static void SectionHeader(const char* label) {
         ImGui::Spacing();
-        ImGui::TextColored(ImVec4(0.00f, 0.83f, 1.00f, 1.00f), "%s", label);
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.00f, 0.83f, 1.00f, 1.00f));
+        ImGui::TextUnformatted(label);
+        ImGui::PopStyleColor();
         ImGui::Separator();
         ImGui::Spacing();
     }
@@ -110,6 +114,36 @@ namespace C4pt0r::Menu
             ImGui::PopTextWrapPos();
             ImGui::EndTooltip();
         }
+    }
+
+    // Sidebar tab button — cyan-filled when active
+    static bool SideTab(const char* label, int idx, float width)
+    {
+        bool active = (g_Menu.currentTab == idx);
+        if (active) {
+            ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.00f, 0.55f, 0.70f, 0.85f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.00f, 0.65f, 0.80f, 0.90f));
+            ImGui::PushStyleColor(ImGuiCol_Text,          ImVec4(1.00f, 1.00f, 1.00f, 1.00f));
+        } else {
+            ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.08f, 0.09f, 0.13f, 0.60f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.00f, 0.45f, 0.58f, 0.60f));
+            ImGui::PushStyleColor(ImGuiCol_Text,          ImVec4(0.70f, 0.75f, 0.80f, 1.00f));
+        }
+        bool clicked = ImGui::Button(label, ImVec2(width, 36));
+        ImGui::PopStyleColor(3);
+        if (clicked) g_Menu.currentTab = idx;
+        return clicked;
+    }
+
+    static void LinkButton(const char* label, const char* url, float width)
+    {
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.10f, 0.10f, 0.18f, 0.80f));
+        bool clicked = ImGui::Button(label, ImVec2(width, 30));
+        ImGui::PopStyleColor();
+        if (clicked && url && url[0])
+            ShellExecuteA(nullptr, "open", url, nullptr, nullptr, SW_SHOWNORMAL);
+        if (ImGui::IsItemHovered() && !url)
+            ImGui::SetTooltip("Em breve");
     }
 
     // ---- Tab renderers --------------------------------------------------
@@ -202,7 +236,6 @@ namespace C4pt0r::Menu
         ImGui::Spacing();
 
         if (ImGui::Button("Salvar posicao", ImVec2(-1, 32))) {
-            // Feature tick saves the coords
             g_Teleport.hasSaved = true;
         }
 
@@ -216,6 +249,89 @@ namespace C4pt0r::Menu
         }
     }
 
+    static void TabTools()
+    {
+        SectionHeader("INSPECTOR AO VIVO");
+
+        ImGui::Checkbox("Atualizar inspector", &g_Farm.inspEnabled);
+        if (g_Farm.inspEnabled) {
+            const auto& d = g_Inspector;
+            ImGui::Text("Nome:    %s", d.name[0] ? d.name : "-");
+            ImGui::Text("Player:  %d    Ped: %d", d.player, d.ped);
+            ImGui::Text("Pos:     %.2f, %.2f, %.2f", d.pos.x, d.pos.y, d.pos.z);
+            ImGui::Text("Heading: %.1f   Speed: %.1f m/s", d.heading, d.speed);
+            ImGui::Text("Vida:    %d   Colete: %d   Arma: 0x%08X",
+                        d.health, d.armor, d.weapon);
+            ImGui::Text("Veiculo: %s", d.inVehicle ? "sim" : "nao");
+
+            ImGui::Spacing();
+            ImGui::TextDisabled("Controles pressionados agora:");
+            bool any = false;
+            for (int i = 0; i < 8; ++i) {
+                if (d.pressed[i]) {
+                    ImGui::SameLine();
+                    ImGui::TextColored(ImVec4(0, 0.83f, 1, 1), "[%d]", d.pressed[i]);
+                    any = true;
+                }
+            }
+            if (!any) ImGui::TextDisabled("  (nenhum — aperte E/F/G/R...)");
+
+            // control id cheatsheet
+            ImGui::Spacing();
+            ImGui::TextDisabled("IDs: 51=E(contexto) 38=E(pickup) 75=F 47=G 45=R 244=M");
+        }
+
+        SectionHeader("MACRO DE FARM (coleta -> venda)");
+
+        if (ImGui::Button(g_Farm.hasPointA ? "Regravar ponto A (coleta)" : "Gravar ponto A (coleta)",
+                          ImVec2(-1, 30))) {
+            g_Farm.ax = g_Inspector.pos.x;
+            g_Farm.ay = g_Inspector.pos.y;
+            g_Farm.az = g_Inspector.pos.z;
+            g_Farm.hasPointA = true;
+        }
+        if (g_Farm.hasPointA)
+            ImGui::TextDisabled("  A: %.1f, %.1f, %.1f", g_Farm.ax, g_Farm.ay, g_Farm.az);
+
+        if (ImGui::Button(g_Farm.hasPointB ? "Regravar ponto B (venda)" : "Gravar ponto B (venda)",
+                          ImVec2(-1, 30))) {
+            g_Farm.bx = g_Inspector.pos.x;
+            g_Farm.by = g_Inspector.pos.y;
+            g_Farm.bz = g_Inspector.pos.z;
+            g_Farm.hasPointB = true;
+        }
+        if (g_Farm.hasPointB)
+            ImGui::TextDisabled("  B: %.1f, %.1f, %.1f", g_Farm.bx, g_Farm.by, g_Farm.bz);
+
+        ImGui::Spacing();
+        const char* keys[] = { "E (contexto 51)", "E (pickup 38)", "F (75)", "G (47)" };
+        static const int keyIds[] = { 51, 38, 75, 47 };
+        int cur = 0;
+        for (int i = 0; i < 4; ++i) if (keyIds[i] == g_Farm.keyControl) cur = i;
+        if (ImGui::Combo("Tecla da acao##farm", &cur, keys, IM_ARRAYSIZE(keys)))
+            g_Farm.keyControl = keyIds[cur];
+
+        ImGui::SliderInt("Espera apos TP (ms)##farm", &g_Farm.settleMs, 200, 5000);
+        ImGui::SliderInt("Intervalo da acao (ms)##farm", &g_Farm.intervalMs, 200, 10000);
+        ImGui::InputInt("Repeticoes (0 = infinito)##farm", &g_Farm.repeatTimes);
+        if (g_Farm.repeatTimes < 0) g_Farm.repeatTimes = 0;
+
+        ImGui::Spacing();
+        if (!g_Farm.running) {
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.00f, 0.60f, 0.30f, 0.80f));
+            if (ImGui::Button("INICIAR FARM", ImVec2(-1, 34)))
+                g_Farm.running = true;
+            ImGui::PopStyleColor();
+        } else {
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.70f, 0.10f, 0.10f, 0.80f));
+            if (ImGui::Button("PARAR FARM", ImVec2(-1, 34)))
+                g_Farm.running = false;
+            ImGui::PopStyleColor();
+        }
+        if (g_Farm.cyclesDone > 0)
+            ImGui::TextDisabled("  Ciclos feitos: %d", g_Farm.cyclesDone);
+    }
+
     static void TabSettings()
     {
         SectionHeader("MENU");
@@ -223,6 +339,11 @@ namespace C4pt0r::Menu
         ImGui::Checkbox("Watermark", &g_Menu.showWatermark);
         ImGui::TextDisabled("Tecla do menu: F9");
         ImGui::TextDisabled("Panic key (unload): END");
+
+        SectionHeader("COMUNIDADE");
+        LinkButton("Discord  —  discord.gg/PhkbhxMBy",
+                   "https://discord.gg/PhkbhxMBy", -1);
+        LinkButton("YouTube  —  C4pt0r - Mods (em breve)", nullptr, -1);
 
         SectionHeader("INFO");
         ImGui::TextDisabled("C4pt0r Cheats v1.0");
@@ -234,23 +355,54 @@ namespace C4pt0r::Menu
     // ---- Main render ----------------------------------------------------
     void Render()
     {
-        ImGui::SetNextWindowSize(ImVec2(460, 420), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(600, 460), ImGuiCond_FirstUseEver);
 
         ImGui::Begin("C4pt0r Cheats##main", &g_Menu.isOpen,
             ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoScrollbar);
 
-        // ---- Tabs ----
-        if (ImGui::BeginTabBar("##tabs", ImGuiTabBarFlags_FittingPolicyResizeDown)) {
+        // ---- Sidebar ----
+        ImGui::BeginChild("##sidebar", ImVec2(140, 0),
+                          ImGuiChildFlags_Border | ImGuiChildFlags_ResizeX);
 
-            if (ImGui::BeginTabItem("Combat"))   { TabCombat();   ImGui::EndTabItem(); }
-            if (ImGui::BeginTabItem("Visuals"))   { TabVisuals();  ImGui::EndTabItem(); }
-            if (ImGui::BeginTabItem("Player"))    { TabPlayer();   ImGui::EndTabItem(); }
-            if (ImGui::BeginTabItem("Teleport"))  { TabTeleport(); ImGui::EndTabItem(); }
-            if (ImGui::BeginTabItem("Settings"))  { TabSettings(); ImGui::EndTabItem(); }
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.00f, 0.83f, 1.00f, 1.00f));
+        ImGui::TextUnformatted("C4pt0r");
+        ImGui::PopStyleColor();
+        ImGui::SameLine();
+        ImGui::TextDisabled("v1.0");
+        ImGui::Separator();
+        ImGui::Spacing();
 
-            ImGui::EndTabBar();
+        float tabW = ImGui::GetContentRegionAvail().x;
+        SideTab("Combat",    0, tabW);
+        SideTab("Visuals",   1, tabW);
+        SideTab("Player",    2, tabW);
+        SideTab("Teleport",  3, tabW);
+        SideTab("Ferramentas", 4, tabW);
+        SideTab("Settings",  5, tabW);
+
+        // push links to the bottom of the sidebar
+        float remain = ImGui::GetContentRegionAvail().y - 70;
+        if (remain > 0) ImGui::Dummy(ImVec2(0, remain));
+        ImGui::Separator();
+        LinkButton("Discord", "https://discord.gg/PhkbhxMBy", tabW);
+        LinkButton("YouTube (breve)", nullptr, tabW);
+
+        ImGui::EndChild();
+        ImGui::SameLine();
+
+        // ---- Content ----
+        ImGui::BeginChild("##content", ImVec2(0, 0));
+
+        switch (g_Menu.currentTab) {
+            case 0: TabCombat();   break;
+            case 1: TabVisuals();  break;
+            case 2: TabPlayer();   break;
+            case 3: TabTeleport(); break;
+            case 4: TabTools();    break;
+            case 5: TabSettings(); break;
         }
 
+        ImGui::EndChild();
         ImGui::End();
     }
 }

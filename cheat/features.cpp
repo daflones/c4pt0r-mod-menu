@@ -17,6 +17,7 @@
 
 #include <cmath>
 #include <algorithm>
+#include <chrono>
 
 // Math helpers
 constexpr float PI = 3.14159265358979f;
@@ -319,6 +320,131 @@ namespace C4pt0r::Features
         }
     }
 
+    // ---- Live inspector (writes g_Inspector for the Tools tab) ----------
+    static void TickInspector()
+    {
+        if (!g_Farm.inspEnabled) return;
+
+        int ped    = Natives::PlayerPedId();
+        int player = Natives::PlayerId();
+
+        g_Inspector.ped    = ped;
+        g_Inspector.player = player;
+        if (!ped) return;
+
+        g_Inspector.pos     = Natives::GetEntityCoords(ped);
+        g_Inspector.heading = Natives::GetEntityHeading(ped);
+        g_Inspector.health  = Natives::GetEntityHealth(ped);
+        g_Inspector.armor   = Natives::GetPedArmour(ped);
+        g_Inspector.speed   = Natives::GetEntitySpeed(ped);
+        g_Inspector.weapon  = Natives::GetSelectedPedWeapon(ped);
+        g_Inspector.inVehicle = Natives::IsPedInAnyVehicle(ped);
+        g_Inspector.vehicle   = g_Inspector.inVehicle
+                                ? Natives::GetVehiclePedIsIn(ped) : 0;
+
+        const char* nm = Natives::GetPlayerName(player);
+        if (nm) strncpy_s(g_Inspector.name, nm, sizeof(g_Inspector.name) - 1);
+
+        // Controls worth capturing for RP-job actions (E, pickup, F, G, R, M)
+        static const int watch[] = { 51, 38, 75, 47, 45, 244, 23, 58 };
+        int out = 0;
+        for (int c : watch) {
+            if (Natives::IsControlPressed(c))
+                g_Inspector.pressed[out++] = c;
+        }
+        while (out < 8) g_Inspector.pressed[out++] = 0;
+    }
+
+    // ---- Farm macro (coleta -> vende -> repete) --------------------------
+    //  Timeline per cycle:
+    //    TP A -> settle -> press key x holdFrames -> interval ->
+    //    TP B -> settle -> press key x holdFrames -> interval -> next cycle
+    enum class FarmStage { Idle, ToA, ActA, WaitA, ToB, ActB, WaitB };
+    static FarmStage s_Stage = FarmStage::Idle;
+    static std::chrono::steady_clock::time_point s_StageSince;
+    static int s_HoldsLeft = 0;
+
+    static bool StageElapsed(int ms) {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(
+                   std::chrono::steady_clock::now() - s_StageSince).count() >= ms;
+    }
+    static void SetStage(FarmStage s) {
+        s_Stage = s;
+        s_StageSince = std::chrono::steady_clock::now();
+    }
+
+    static void TickFarm()
+    {
+        if (!g_Farm.running) {
+            if (s_Stage != FarmStage::Idle) s_Stage = FarmStage::Idle;
+            return;
+        }
+
+        if (!g_Farm.hasPointA || !g_Farm.hasPointB) {
+            g_Farm.running = false;
+            s_Stage = FarmStage::Idle;
+            Log::Write("Farm: precisa gravar ponto A e B primeiro.");
+            return;
+        }
+
+        int ped = Natives::PlayerPedId();
+        if (!ped) return;
+
+        switch (s_Stage) {
+        case FarmStage::Idle:
+            SetStage(FarmStage::ToA);
+            break;
+
+        case FarmStage::ToA:
+            Natives::SetEntityCoordsNoOffset(ped, g_Farm.ax, g_Farm.ay, g_Farm.az + 0.5f);
+            SetStage(FarmStage::ActA);
+            s_HoldsLeft = g_Farm.holdFrames;
+            break;
+        case FarmStage::ActA:
+            if (StageElapsed(g_Farm.settleMs)) {
+                if (s_HoldsLeft > 0) {
+                    Natives::PressControl(g_Farm.keyControl, 1.0f);
+                    --s_HoldsLeft;
+                } else {
+                    SetStage(FarmStage::WaitA);
+                }
+            }
+            break;
+        case FarmStage::WaitA:
+            if (StageElapsed(g_Farm.settleMs + g_Farm.intervalMs))
+                SetStage(FarmStage::ToB);
+            break;
+
+        case FarmStage::ToB:
+            Natives::SetEntityCoordsNoOffset(ped, g_Farm.bx, g_Farm.by, g_Farm.bz + 0.5f);
+            SetStage(FarmStage::ActB);
+            s_HoldsLeft = g_Farm.holdFrames;
+            break;
+        case FarmStage::ActB:
+            if (StageElapsed(g_Farm.settleMs)) {
+                if (s_HoldsLeft > 0) {
+                    Natives::PressControl(g_Farm.keyControl, 1.0f);
+                    --s_HoldsLeft;
+                } else {
+                    ++g_Farm.cyclesDone;
+                    SetStage(FarmStage::WaitB);
+                }
+            }
+            break;
+        case FarmStage::WaitB:
+            if (StageElapsed(g_Farm.settleMs + g_Farm.intervalMs)) {
+                if (g_Farm.repeatTimes > 0 && g_Farm.cyclesDone >= g_Farm.repeatTimes) {
+                    g_Farm.running = false;
+                    s_Stage = FarmStage::Idle;
+                    Log::Write("Farm: %d ciclos concluidos.", g_Farm.cyclesDone);
+                } else {
+                    SetStage(FarmStage::ToA);
+                }
+            }
+            break;
+        }
+    }
+
     // ---- Main tick (called from cheat thread) ---------------------------
     void Tick()
     {
@@ -343,6 +469,8 @@ namespace C4pt0r::Features
         TickTeleport();
         TickESPData();
         TickAimbot();
+        TickInspector();
+        TickFarm();
     }
 
     // ====================================================================
