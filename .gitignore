@@ -41,3 +41,8 @@ Desktop.ini
 # Temp
 *.tmp
 *.bak
+
+# Dist packaging artifacts (never commit client zip or updates clone)
+dist/out/
+dist/updates-repo/
+cheat/build/

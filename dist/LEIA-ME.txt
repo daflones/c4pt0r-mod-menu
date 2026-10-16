@@ -1,0 +1,74 @@
+====================================================================
+   C4PT0R MOD MENU - FiveM
+   Instalacao e uso - leia antes de usar
+====================================================================
+
+CONTEUDO DO PACOTE
+--------------------------------------------------------------------
+  C4pt0r-Injector.exe ... o programa que injeta o menu no jogo
+  C4pt0r-Cheat.dll ...... o mod menu em si (nao apague nem renomeie)
+  Atualizar.bat ......... atualizador automatico
+  version.txt ........... versao instalada (nao mexa)
+
+
+PASSO A PASSO - PRIMEIRO USO
+--------------------------------------------------------------------
+  1. Extraia TODOS os arquivos do ZIP para uma pasta qualquer
+     (ex: Documentos\C4pt0r). NAO rode direto de dentro do ZIP.
+
+  2. Abra o FiveM normalmente e entre num servidor.
+     Espere spawnar/estar andando no jogo.
+
+  3. Clique com o botao direito em "C4pt0r-Injector.exe"
+     e escolha "Executar como administrador".
+
+  4. O injetor ja encontra a DLL sozinho. Clique em INJETAR.
+
+  5. Volte pro jogo e aperte F9 para abrir/fechar o menu.
+     END fecha/descarrega o cheat.
+
+
+CONTROLES DO MENU
+--------------------------------------------------------------------
+  F9 ......... abre/fecha o menu
+  END ........ descarrega o cheat (panico)
+
+
+ATUALIZACOES
+--------------------------------------------------------------------
+  Sempre que sair versao nova, abra "Atualizar.bat" (pode ser como
+  usuario normal). Ele baixa e instala sozinho por cima da pasta.
+  Feche o injetor e o FiveM antes de atualizar.
+
+
+PROBLEMAS COMUNS
+--------------------------------------------------------------------
+  "FiveM nao encontrado"
+      -> voce tem que estar DENTRO de um servidor, nao no menu do FiveM.
+
+  "OpenProcess falhou" / injecao falha
+      -> rode o injetor como ADMINISTRADOR.
+
+  Antivirus bloqueou
+      -> adicione a pasta do C4pt0r nas exclusoes do antivirus.
+         (mod menus sempre aparecem como falso positivo)
+
+  O jogo fechou depois de injetar
+      -> versao do FiveM pode ter atualizado. Rode o Atualizar.bat;
+         se nao tiver update ainda, avise no Discord.
+
+  Menu nao abre com F9
+      -> confira se injetou DEPOIS de entrar no servidor.
+
+
+SUPORTE
+--------------------------------------------------------------------
+  Discord: https://discord.gg/PhkbhxMBy
+  YouTube: C4pt0r - Mods
+
+
+AVISO
+--------------------------------------------------------------------
+  Uso por sua conta e risco. Mods/cheats violam os termos do FiveM
+  e de muitos servidores - banimento e responsabilidade do usuario.
+====================================================================
