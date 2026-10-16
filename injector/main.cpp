@@ -1,9 +1,8 @@
 // ============================================================================
-//  C4pt0r Cheats — Injector
-//  Win32 GUI (dark themed) — finds FiveM process, injects DLL
-//  Injection: CreateRemoteThread + LoadLibraryW
+//  C4pt0r Loader — injetor com login + licenca (Supabase)
+//  Login -> license-check -> baixa DLL assinada -> injeta no FiveM
+//  Sem licenca: compra via PIX dentro do proprio loader.
 // ============================================================================
-
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -11,479 +10,717 @@
 #include <Windows.h>
 #include <TlHelp32.h>
 #include <dwmapi.h>
-#include <commdlg.h>
+#include <wincrypt.h>
+#include <wincodec.h>
+#include <ShlObj.h>
+#include <Shlwapi.h>
+#include <Shellapi.h>
 #include <string>
 #include <vector>
+#include <atomic>
+#include <thread>
 #include <filesystem>
-#include <ShlObj.h>
+#include "net.h"
 
 #pragma comment(lib, "dwmapi.lib")
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "shell32.lib")
+#pragma comment(lib, "crypt32.lib")
+#pragma comment(lib, "windowscodecs.lib")
+#pragma comment(lib, "ole32.lib")
+#pragma comment(lib, "shlwapi.lib")
 
-// ---- Colors -------------------------------------------------------------
-constexpr COLORREF CLR_BG        = RGB(15, 15, 25);
-constexpr COLORREF CLR_PANEL     = RGB(22, 22, 38);
-constexpr COLORREF CLR_ACCENT    = RGB(0, 212, 255);
-constexpr COLORREF CLR_TEXT      = RGB(220, 225, 235);
-constexpr COLORREF CLR_DIM       = RGB(100, 105, 115);
-constexpr COLORREF CLR_SUCCESS   = RGB(0, 255, 120);
-constexpr COLORREF CLR_ERROR     = RGB(255, 60, 60);
-constexpr COLORREF CLR_BTN       = RGB(0, 140, 180);
-constexpr COLORREF CLR_BTN_HOT   = RGB(0, 180, 220);
-constexpr COLORREF CLR_EDIT_BG   = RGB(30, 30, 50);
+// ---- Config ----------------------------------------------------------------
+static const char* SUPA_HOST = "bzthdklqvjtutkeiimpq.supabase.co";
+static const char* ANON_KEY  = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJ6dGhka2xxdmp0dXRrZWlpbXBxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTIxNzU2MDYsImV4cCI6MjEwNzc1MTYwNn0.K1_us_hjL10yynZRDsrWZKwId-l5NuzrDSuHeFXtIdI";
+static const char* PRODUCT   = "c4pt0r-mod-menu";
+static const wchar_t* DISCORD_URL = L"https://discord.gg/PhkbhxMBy";
+static const wchar_t* STORE_URL   = L"https://c4pt0r-store.eletrify.me/cadastro";
 
-// ---- Globals ------------------------------------------------------------
-static HWND   g_hWnd       = nullptr;
-static HWND   g_hStatus    = nullptr;
-static HWND   g_hDllPath   = nullptr;
-static HWND   g_hLog       = nullptr;
-static HWND   g_hBtnInject = nullptr;
-static HWND   g_hBtnBrowse = nullptr;
-static HBRUSH g_BgBrush    = nullptr;
-static HBRUSH g_PanelBrush = nullptr;
-static HBRUSH g_EditBrush  = nullptr;
-static HFONT  g_Font       = nullptr;
-static HFONT  g_FontBold   = nullptr;
-static HFONT  g_FontTitle  = nullptr;
+// ---- Colors ----------------------------------------------------------------
+constexpr COLORREF CLR_BG      = RGB(13, 13, 22);
+constexpr COLORREF CLR_PANEL   = RGB(20, 20, 42);
+constexpr COLORREF CLR_ACCENT  = RGB(0, 212, 255);
+constexpr COLORREF CLR_TEXT    = RGB(220, 225, 235);
+constexpr COLORREF CLR_DIM     = RGB(100, 105, 115);
+constexpr COLORREF CLR_OK      = RGB(46, 230, 109);
+constexpr COLORREF CLR_ERR     = RGB(255, 77, 106);
+constexpr COLORREF CLR_GOLD    = RGB(255, 184, 64);
+constexpr COLORREF CLR_BTN     = RGB(0, 140, 180);
+constexpr COLORREF CLR_BTN_HOT = RGB(0, 180, 220);
+constexpr COLORREF CLR_EDIT_BG = RGB(14, 14, 32);
 
-static std::wstring g_DllPathStr;
-static bool         g_Injected = false;
+// ---- App state -------------------------------------------------------------
+enum Screen { SCR_LOGIN, SCR_MAIN, SCR_PAY };
 
-// ---- Control IDs --------------------------------------------------------
+struct Shared {
+    std::atomic<int>     screen{SCR_LOGIN};
+    std::atomic<bool>    busy{false};
+    std::atomic<bool>    licensed{false};
+    std::atomic<bool>    paid{false};
+    std::atomic<bool>    injected{false};
+    std::string          accessToken, refreshToken, email;
+    std::wstring         licLabel = L"Verificando licenca...";
+    std::string          downloadUrl;
+    std::string          orderId, qrEmv;
+    std::wstring         lastErr;
+} g;
+
+// ---- Controls --------------------------------------------------------------
+static HWND g_hWnd, g_hEmail, g_hPass, g_hStatus, g_hLog, g_hQrBox, g_hEmv;
+static HWND g_hBtnLogin, g_hBtnDiscord, g_hBtnSignup, g_hBtnMain, g_hBtnCopy,
+            g_hBtnLogout, g_hBtnBack;
+static HBRUSH g_BgBrush, g_PanelBrush, g_EditBrush;
+static HFONT  g_Font, g_FontBold, g_FontTitle, g_FontBig;
+static HBITMAP g_QrBitmap = nullptr;
+
 enum {
-    ID_BTN_INJECT = 101,
-    ID_BTN_BROWSE = 102,
-    ID_EDIT_DLL   = 103,
-    ID_STATIC_LOG = 104,
-    ID_STATIC_STATUS = 105,
+    ID_EMAIL = 201, ID_PASS, ID_BTN_LOGIN, ID_BTN_DISCORD, ID_BTN_SIGNUP,
+    ID_BTN_MAIN, ID_BTN_COPY, ID_BTN_LOGOUT, ID_BTN_BACK, ID_QRBOX, ID_EMV,
+    ID_STATUS, ID_LOG, ID_TIMER_POLL = 900,
 };
 
-// ---- Log helper ---------------------------------------------------------
-static void Log(const wchar_t* msg, COLORREF /*color*/ = CLR_TEXT) {
-    // Append to the log static
+// ---- Log helper -------------------------------------------------------------
+static void Log(const wchar_t* msg) {
     int len = GetWindowTextLengthW(g_hLog);
-    std::wstring current(len + 1, L'\0');
-    GetWindowTextW(g_hLog, current.data(), len + 1);
-    current.resize(len);
-    if (!current.empty()) current += L"\r\n";
-    current += msg;
-    SetWindowTextW(g_hLog, current.c_str());
+    std::wstring cur(len + 1, L'\0');
+    GetWindowTextW(g_hLog, cur.data(), len + 1);
+    cur.resize(len);
+    if (!cur.empty()) cur += L"\r\n";
+    cur += msg;
+    SetWindowTextW(g_hLog, cur.c_str());
+}
+static void Log(const std::string& s) { Log(ToWide(s).c_str()); }
+
+// ---- Session persistence (DPAPI) -------------------------------------------
+static std::wstring SessPath() {
+    wchar_t* app = nullptr;
+    SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, nullptr, &app);
+    std::wstring dir = app;
+    CoTaskMemFree(app);
+    dir += L"\\C4pt0r";
+    CreateDirectoryW(dir.c_str(), nullptr);
+    return dir + L"\\session.bin";
+}
+static void SaveRefresh(const std::string& token) {
+    DATA_BLOB in{ (DWORD)token.size(), (BYTE*)token.data() }, out{};
+    if (CryptProtectData(&in, L"c4", nullptr, nullptr, nullptr, 0, &out)) {
+        HANDLE f = CreateFileW(SessPath().c_str(), GENERIC_WRITE, 0, nullptr,
+            CREATE_ALWAYS, FILE_ATTRIBUTE_HIDDEN, nullptr);
+        if (f != INVALID_HANDLE_VALUE) {
+            DWORD w; WriteFile(f, out.pbData, out.cbData, &w, nullptr); CloseHandle(f);
+        }
+        LocalFree(out.pbData);
+    }
+}
+static std::string LoadRefresh() {
+    HANDLE f = CreateFileW(SessPath().c_str(), GENERIC_READ, FILE_SHARE_READ,
+        nullptr, OPEN_EXISTING, 0, nullptr);
+    if (f == INVALID_HANDLE_VALUE) return "";
+    DWORD sz = GetFileSize(f, nullptr);
+    std::vector<BYTE> buf(sz);
+    DWORD r; ReadFile(f, buf.data(), sz, &r, nullptr); CloseHandle(f);
+    DATA_BLOB in{ sz, buf.data() }, out{};
+    if (!CryptUnprotectData(&in, nullptr, nullptr, nullptr, nullptr, 0, &out)) return "";
+    std::string t((char*)out.pbData, out.cbData);
+    LocalFree(out.pbData);
+    return t;
+}
+static void ClearSession() { DeleteFileW(SessPath().c_str()); }
+
+// ---- HWID -------------------------------------------------------------------
+static std::string GetHwid() {
+    DWORD serial = 0;
+    GetVolumeInformationW(L"C:\\", nullptr, 0, &serial, nullptr, nullptr, nullptr, 0);
+    wchar_t comp[MAX_COMPUTERNAME_LENGTH + 1] = {};
+    DWORD clen = MAX_COMPUTERNAME_LENGTH + 1;
+    GetComputerNameW(comp, &clen);
+    char buf[64];
+    snprintf(buf, 64, "%08X-%08X", serial, (unsigned)(serial ^ clen ^ comp[0]));
+    return buf;
 }
 
-// ---- Process finding ----------------------------------------------------
-struct ProcessInfo {
-    DWORD pid;
-    std::wstring name;
-};
+// ---- Supabase helpers -------------------------------------------------------
+static std::vector<std::pair<std::string, std::string>> ApiHdrs(const std::string& jwt = "") {
+    std::vector<std::pair<std::string, std::string>> h = {
+        {"apikey", ANON_KEY},
+        {"Content-Type", "application/json"},
+    };
+    if (!jwt.empty()) h.push_back({ "Authorization", "Bearer " + jwt });
+    return h;
+}
 
-static std::vector<ProcessInfo> FindFiveMProcesses() {
-    std::vector<ProcessInfo> results;
+static HttpRes FnCall(const char* name, const std::string& body, const std::string& jwt) {
+    return Http(SUPA_HOST, "POST", std::string("/functions/v1/") + name, ApiHdrs(jwt), body);
+}
+
+static bool DoPasswordGrant(const std::string& email, const std::string& pass, std::wstring& err) {
+    std::string body = "{\"email\":\"" + email + "\",\"password\":\"" + pass + "\"}";
+    auto r = Http(SUPA_HOST, "POST", "/auth/v1/token?grant_type=password", ApiHdrs(), body);
+    auto j = JsonParse(r.body);
+    if (r.status == 200 && !j["access_token"].str().empty()) {
+        g.accessToken = j["access_token"].str();
+        g.refreshToken = j["refresh_token"].str();
+        SaveRefresh(g.refreshToken);
+        return true;
+    }
+    err = ToWide(j["error_description"].str().empty() ? j["msg"].str() : j["error_description"].str());
+    if (err.empty()) err = L"Email ou senha incorretos.";
+    return false;
+}
+
+static bool DoRefresh(const std::string& rt) {
+    std::string body = "{\"refresh_token\":\"" + rt + "\"}";
+    auto r = Http(SUPA_HOST, "POST", "/auth/v1/token?grant_type=refresh_token", ApiHdrs(), body);
+    auto j = JsonParse(r.body);
+    if (r.status == 200 && !j["access_token"].str().empty()) {
+        g.accessToken = j["access_token"].str();
+        g.refreshToken = j["refresh_token"].str();
+        SaveRefresh(g.refreshToken);
+        return true;
+    }
+    return false;
+}
+
+static bool CheckLicense(std::wstring& label) {
+    std::string body = "{\"action\":\"check\",\"product_slug\":\"" + std::string(PRODUCT) +
+        "\",\"hwid\":\"" + GetHwid() + "\"}";
+    auto r = FnCall("license-check", body, g.accessToken);
+    auto j = JsonParse(r.body);
+    if (j["licensed"].truthy()) {
+        g.downloadUrl = j["download_url"].str();
+        auto lic = j["license"];
+        std::string exp = lic["expires_at"].str();
+        label = exp.empty()
+            ? L"Licenca: VITALICIA"
+            : L"Licenca: ATIVA ate " + ToWide(exp.substr(0, 10));
+        return true;
+    }
+    auto e = j["error"].str();
+    label = e.empty() ? L"Sem licenca ativa" : ToWide(e);
+    return false;
+}
+
+// ---- FiveM process + inject (mesmo codigo de antes) -------------------------
+static DWORD FindFiveMPid() {
     HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
-    if (snap == INVALID_HANDLE_VALUE) return results;
-
-    PROCESSENTRY32W pe{};
-    pe.dwSize = sizeof(pe);
-
+    if (snap == INVALID_HANDLE_VALUE) return 0;
+    PROCESSENTRY32W pe{}; pe.dwSize = sizeof(pe);
+    DWORD pid = 0;
     if (Process32FirstW(snap, &pe)) {
         do {
-            std::wstring name = pe.szExeFile;
-            // FiveM game process: FiveM_b????_GTAProcess.exe or FiveM_GTAProcess.exe
-            // Also check for plain GTA5.exe in case of custom launcher
-            if (name.find(L"FiveM") != std::wstring::npos &&
-                name.find(L"GTAProcess") != std::wstring::npos)
-            {
-                results.push_back({ pe.th32ProcessID, name });
-            }
-            // Also accept fivem_b*_GTAProcess (lowercase variants)
-            else if (name.find(L"fivem") != std::wstring::npos &&
-                     name.find(L"GTAProcess") != std::wstring::npos)
-            {
-                results.push_back({ pe.th32ProcessID, name });
-            }
+            std::wstring n = pe.szExeFile;
+            if (n.find(L"GTAProcess") != std::wstring::npos) { pid = pe.th32ProcessID; break; }
         } while (Process32NextW(snap, &pe));
     }
     CloseHandle(snap);
-    return results;
+    return pid;
 }
 
-// ---- DLL Injection ------------------------------------------------------
 static bool InjectDLL(DWORD pid, const std::wstring& dllPath) {
-    HANDLE hProcess = OpenProcess(
-        PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION |
-        PROCESS_VM_OPERATION | PROCESS_VM_WRITE | PROCESS_VM_READ,
-        FALSE, pid);
-
-    if (!hProcess) {
-        Log(L"[ERRO] OpenProcess falhou. Rode como administrador.");
-        return false;
-    }
-
-    // Allocate memory in target for DLL path
-    size_t pathSize = (dllPath.size() + 1) * sizeof(wchar_t);
-    void* remoteMem = VirtualAllocEx(hProcess, nullptr, pathSize, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-    if (!remoteMem) {
-        Log(L"[ERRO] VirtualAllocEx falhou.");
-        CloseHandle(hProcess);
-        return false;
-    }
-
-    // Write DLL path
-    if (!WriteProcessMemory(hProcess, remoteMem, dllPath.c_str(), pathSize, nullptr)) {
-        Log(L"[ERRO] WriteProcessMemory falhou.");
-        VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE);
-        CloseHandle(hProcess);
-        return false;
-    }
-
-    // Get LoadLibraryW address
-    HMODULE hKernel = GetModuleHandleW(L"kernel32.dll");
-    auto loadLibAddr = reinterpret_cast<LPTHREAD_START_ROUTINE>(
-        GetProcAddress(hKernel, "LoadLibraryW"));
-
-    // Create remote thread
-    HANDLE hThread = CreateRemoteThread(hProcess, nullptr, 0, loadLibAddr, remoteMem, 0, nullptr);
-    if (!hThread) {
-        Log(L"[ERRO] CreateRemoteThread falhou.");
-        VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE);
-        CloseHandle(hProcess);
-        return false;
-    }
-
-    // Wait for injection to complete
-    WaitForSingleObject(hThread, 10000);
-
-    // Check if LoadLibrary succeeded
-    DWORD exitCode = 0;
-    GetExitCodeThread(hThread, &exitCode);
-
-    CloseHandle(hThread);
-    VirtualFreeEx(hProcess, remoteMem, 0, MEM_RELEASE);
-    CloseHandle(hProcess);
-
-    return exitCode != 0;
+    HANDLE h = OpenProcess(PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION |
+        PROCESS_VM_OPERATION | PROCESS_VM_WRITE | PROCESS_VM_READ, FALSE, pid);
+    if (!h) return false;
+    size_t sz = (dllPath.size() + 1) * sizeof(wchar_t);
+    void* mem = VirtualAllocEx(h, nullptr, sz, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    if (!mem) { CloseHandle(h); return false; }
+    WriteProcessMemory(h, mem, dllPath.c_str(), sz, nullptr);
+    auto load = reinterpret_cast<LPTHREAD_START_ROUTINE>(
+        GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "LoadLibraryW"));
+    HANDLE t = CreateRemoteThread(h, nullptr, 0, load, mem, 0, nullptr);
+    if (!t) { VirtualFreeEx(h, mem, 0, MEM_RELEASE); CloseHandle(h); return false; }
+    WaitForSingleObject(t, 10000);
+    DWORD code = 0; GetExitCodeThread(t, &code);
+    CloseHandle(t); VirtualFreeEx(h, mem, 0, MEM_RELEASE); CloseHandle(h);
+    return code != 0;
 }
 
-// ---- File browser -------------------------------------------------------
-static std::wstring BrowseForDLL(HWND parent) {
-    wchar_t file[MAX_PATH] = {};
-    OPENFILENAMEW ofn{};
-    ofn.lStructSize  = sizeof(ofn);
-    ofn.hwndOwner    = parent;
-    ofn.lpstrFilter  = L"DLL Files\0*.dll\0All Files\0*.*\0";
-    ofn.lpstrFile    = file;
-    ofn.nMaxFile     = MAX_PATH;
-    ofn.Flags        = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST;
-    ofn.lpstrTitle   = L"Selecionar C4pt0r DLL";
-
-    if (GetOpenFileNameW(&ofn))
-        return file;
-    return {};
+// ---- WIC: PNG bytes -> HBITMAP ----------------------------------------------
+static HBITMAP PngToBitmap(const std::string& bytes) {
+    IWICImagingFactory* fac = nullptr;
+    if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
+        IID_IWICImagingFactory, (void**)&fac))) return nullptr;
+    IStream* stm = SHCreateMemStream((const BYTE*)bytes.data(), (UINT)bytes.size());
+    IWICBitmapDecoder* dec = nullptr;
+    HBITMAP bmp = nullptr;
+    if (stm && SUCCEEDED(fac->CreateDecoderFromStream(stm, nullptr, WICDecodeMetadataCacheOnLoad, &dec))) {
+        IWICBitmapFrameDecode* frame = nullptr;
+        if (SUCCEEDED(dec->GetFrame(0, &frame))) {
+            IWICFormatConverter* conv = nullptr;
+            if (SUCCEEDED(fac->CreateFormatConverter(&conv)) &&
+                SUCCEEDED(conv->Initialize(frame, GUID_WICPixelFormat32bppBGRA,
+                    WICBitmapDitherTypeNone, nullptr, 0.0, WICBitmapPaletteTypeCustom))) {
+                UINT w = 0, hgt = 0; conv->GetSize(&w, &hgt);
+                BITMAPINFO bi{}; bi.bmiHeader.biSize = sizeof(bi.bmiHeader);
+                bi.bmiHeader.biWidth = w; bi.bmiHeader.biHeight = -(int)hgt;
+                bi.bmiHeader.biPlanes = 1; bi.bmiHeader.biBitCount = 32;
+                void* bits = nullptr;
+                bmp = CreateDIBSection(nullptr, &bi, DIB_RGB_COLORS, &bits, nullptr, 0);
+                if (bmp && bits) conv->CopyPixels(nullptr, w * 4, w * hgt * 4, (BYTE*)bits);
+            }
+            if (conv) conv->Release();
+            frame->Release();
+        }
+        dec->Release();
+    }
+    if (stm) stm->Release();
+    fac->Release();
+    return bmp;
 }
 
-// ---- Auto-find DLL next to injector -------------------------------------
-static std::wstring FindDLLNextToExe() {
-    wchar_t exePath[MAX_PATH];
-    GetModuleFileNameW(nullptr, exePath, MAX_PATH);
-    std::filesystem::path dir = std::filesystem::path(exePath).parent_path();
+// ---- UI visibility per screen -----------------------------------------------
+static void ApplyScreen() {
+    int s = g.screen.load();
+    auto sw = [&](HWND h, bool v) { ShowWindow(h, v ? SW_SHOW : SW_HIDE); };
+    bool login = s == SCR_LOGIN, main = s == SCR_MAIN, pay = s == SCR_PAY;
+    sw(g_hEmail, login); sw(g_hPass, login); sw(g_hBtnLogin, login); sw(g_hBtnSignup, login);
+    sw(g_hBtnMain, main || pay); sw(g_hBtnLogout, main); sw(g_hBtnBack, pay);
+    sw(g_hQrBox, pay); sw(g_hEmv, pay); sw(g_hBtnCopy, pay);
+    SetWindowTextW(g_hBtnMain, pay ? L"VERIFICAR PAGAMENTO" :
+        (g.licensed ? L"INJETAR" : L"COMPRAR AGORA"));
+    InvalidateRect(g_hWnd, nullptr, TRUE);
+}
 
-    // Look for any .dll that matches our naming
-    for (auto& entry : std::filesystem::directory_iterator(dir)) {
-        if (!entry.is_regular_file()) continue;
-        auto ext = entry.path().extension().wstring();
-        auto stem = entry.path().stem().wstring();
-        if (ext == L".dll" &&
-            (stem.find(L"c4pt0r") != std::wstring::npos ||
-             stem.find(L"C4pt0r") != std::wstring::npos ||
-             stem.find(L"cheat") != std::wstring::npos))
-        {
-            return entry.path().wstring();
+// ---- Worker threads ----------------------------------------------------------
+static void ThreadLogin(const std::string& email, const std::string& pass) {
+    g.busy = true;
+    std::wstring err;
+    if (DoPasswordGrant(email, pass, err)) {
+        g.email = email;
+        std::wstring label;
+        if (CheckLicense(label)) { g.licensed = true; g.licLabel = label; }
+        else g.licLabel = label;
+        g.screen = SCR_MAIN;
+        PostMessageW(g_hWnd, WM_APP + 1, 0, 0);
+    } else {
+        g.lastErr = err;
+        PostMessageW(g_hWnd, WM_APP + 2, 0, 0);
+    }
+    g.busy = false;
+}
+
+static void ThreadCheckLicense() {
+    g.busy = true;
+    std::wstring label;
+    if (CheckLicense(label)) { g.licensed = true; g.licLabel = label; }
+    else { g.licensed = false; g.licLabel = label; }
+    PostMessageW(g_hWnd, WM_APP + 3, 0, 0);
+    g.busy = false;
+}
+
+static void ThreadBuyPix() {
+    g.busy = true;
+    std::string body = "{\"product_slug\":\"" + std::string(PRODUCT) + "\",\"method\":\"pix\"}";
+    auto r = FnCall("checkout", body, g.accessToken);
+    auto j = JsonParse(r.body);
+    if (j["ok"].truthy() && !j["qr_code"].str().empty()) {
+        g.orderId = j["order_id"].str();
+        g.qrEmv = j["qr_code"].str();
+        g.screen = SCR_PAY;
+        g.paid = false;
+        PostMessageW(g_hWnd, WM_APP + 4, 0, 0);
+    } else {
+        g.lastErr = ToWide(j["error"].str().empty() ? "Falha ao gerar PIX." : j["error"].str());
+        PostMessageW(g_hWnd, WM_APP + 2, 0, 0);
+    }
+    g.busy = false;
+}
+
+static void ThreadPollOrder() {
+    while (g.screen == SCR_PAY && !g.paid) {
+        std::string body = "{\"order_id\":\"" + g.orderId + "\"}";
+        auto r = FnCall("order-status", body, g.accessToken);
+        auto j = JsonParse(r.body);
+        if (j["status"].str() == "paid") {
+            g.paid = true;
+            std::wstring label;
+            if (CheckLicense(label)) { g.licensed = true; g.licLabel = label; }
+            PostMessageW(g_hWnd, WM_APP + 5, 0, 0);
+            return;
+        }
+        if (j["status"].str() == "failed" || j["status"].str() == "expired") {
+            g.lastErr = L"Pagamento expirado ou falhou.";
+            PostMessageW(g_hWnd, WM_APP + 2, 0, 0);
+            return;
+        }
+        Sleep(4000);
+    }
+}
+
+static void ThreadDownloadInject() {
+    g.busy = true;
+    if (g.downloadUrl.empty()) {
+        std::wstring label;
+        if (!CheckLicense(label) || g.downloadUrl.empty()) {
+            g.lastErr = L"Nao consegui obter o download.";
+            PostMessageW(g_hWnd, WM_APP + 2, 0, 0);
+            g.busy = false; return;
         }
     }
-    return {};
+    auto r = HttpDownload(g.downloadUrl);
+    if (r.status != 200 || r.body.size() < 10000) {
+        g.lastErr = L"Download da DLL falhou.";
+        PostMessageW(g_hWnd, WM_APP + 2, 0, 0);
+        g.busy = false; return;
+    }
+    wchar_t tmp[MAX_PATH];
+    GetTempPathW(MAX_PATH, tmp);
+    std::wstring dllPath = std::wstring(tmp) + L"c4rt.dll";
+    HANDLE f = CreateFileW(dllPath.c_str(), GENERIC_WRITE, 0, nullptr,
+        CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    DWORD w = 0;
+    WriteFile(f, r.body.data(), (DWORD)r.body.size(), &w, nullptr);
+    CloseHandle(f);
+
+    DWORD pid = FindFiveMPid();
+    if (!pid) {
+        g.lastErr = L"FiveM nao encontrado. Entre num servidor primeiro.";
+        PostMessageW(g_hWnd, WM_APP + 2, 0, 0);
+        g.busy = false; return;
+    }
+    if (InjectDLL(pid, dllPath)) {
+        g.injected = true;
+        PostMessageW(g_hWnd, WM_APP + 6, 0, 0);
+    } else {
+        g.lastErr = L"Injecao falhou. Rode como administrador.";
+        PostMessageW(g_hWnd, WM_APP + 2, 0, 0);
+    }
+    g.busy = false;
 }
 
-// ---- Owner-drawn button -------------------------------------------------
+// ---- Owner-drawn button ------------------------------------------------------
 static void DrawButton(LPDRAWITEMSTRUCT dis) {
     bool hot = (dis->itemState & ODS_SELECTED) || (dis->itemState & ODS_HOTLIGHT);
     COLORREF bg = hot ? CLR_BTN_HOT : CLR_BTN;
+    if (dis->CtlID == ID_BTN_DISCORD || dis->CtlID == ID_BTN_SIGNUP ||
+        dis->CtlID == ID_BTN_BACK || dis->CtlID == ID_BTN_LOGOUT || dis->CtlID == ID_BTN_COPY)
+        bg = hot ? RGB(45, 45, 80) : RGB(35, 35, 65);
 
     HBRUSH brush = CreateSolidBrush(bg);
     HPEN pen = CreatePen(PS_SOLID, 1, CLR_ACCENT);
-    SelectObject(dis->hDC, brush);
-    SelectObject(dis->hDC, pen);
+    SelectObject(dis->hDC, brush); SelectObject(dis->hDC, pen);
     RoundRect(dis->hDC, dis->rcItem.left, dis->rcItem.top,
-              dis->rcItem.right, dis->rcItem.bottom, 8, 8);
-
+        dis->rcItem.right, dis->rcItem.bottom, 8, 8);
     SetBkMode(dis->hDC, TRANSPARENT);
-    SetTextColor(dis->hDC, CLR_TEXT);
+    SetTextColor(dis->hDC, dis->CtlID == ID_BTN_MAIN || dis->CtlID == ID_BTN_LOGIN ? RGB(4, 18, 26) : CLR_TEXT);
     SelectObject(dis->hDC, g_FontBold);
-
-    wchar_t text[64];
-    GetWindowTextW(dis->hwndItem, text, 64);
+    wchar_t text[128]; GetWindowTextW(dis->hwndItem, text, 128);
     DrawTextW(dis->hDC, text, -1, &dis->rcItem, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-
-    DeleteObject(brush);
-    DeleteObject(pen);
+    DeleteObject(brush); DeleteObject(pen);
 }
 
-// ---- WndProc ------------------------------------------------------------
-static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+static HWND MkBtn(const wchar_t* t, int x, int y, int w, int h, int id) {
+    return CreateWindowW(L"BUTTON", t, WS_CHILD | BS_OWNERDRAW,
+        x, y, w, h, g_hWnd, (HMENU)(INT_PTR)id, nullptr, nullptr);
+}
+static HWND MkEdit(int x, int y, int w, int id, bool pass = false) {
+    return CreateWindowExW(0, L"EDIT", L"",
+        WS_CHILD | ES_AUTOHSCROLL | WS_BORDER | (pass ? ES_PASSWORD : 0),
+        x, y, w, 32, g_hWnd, (HMENU)(INT_PTR)id, nullptr, nullptr);
+}
+static HWND MkStatic(const wchar_t* t, int x, int y, int w, int h, int id = 0) {
+    return CreateWindowW(L"STATIC", t, WS_CHILD | SS_LEFT,
+        x, y, w, h, g_hWnd, (HMENU)(INT_PTR)id, nullptr, nullptr);
+}
+
+// ---- WM_CREATE: build all controls hidden, ApplyScreen manages ---------------
+static void BuildUI(HWND hWnd) {
+    int cx = 40, w = 460 - 80;
+
+    // LOGIN
+    MkStatic(L"Email", cx, 92, w, 18);
+    g_hEmail = MkEdit(cx, 112, w, ID_EMAIL);
+    MkStatic(L"Senha", cx, 152, w, 18);
+    g_hPass = MkEdit(cx, 172, w, ID_PASS, true);
+    g_hBtnLogin = MkBtn(L"ENTRAR", cx, 216, w, 42, ID_BTN_LOGIN);
+    g_hBtnSignup = MkBtn(L"CRIAR CONTA", cx, 264, w, 32, ID_BTN_SIGNUP);
+
+    // MAIN
+    g_hStatus = MkStatic(L"", cx, 96, w, 20, ID_STATUS);
+    g_hBtnMain = MkBtn(L"INJETAR", cx, 128, w, 46, ID_BTN_MAIN);
+    g_hBtnLogout = MkBtn(L"SAIR", cx, 264, w, 32, ID_BTN_LOGOUT);
+
+    // PAY
+    g_hQrBox = MkStatic(L"", cx + 65, 118, 220, 220, ID_QRBOX);
+    g_hEmv = MkEdit(cx, 346, w - 90, ID_EMV);
+    SendMessageW(g_hEmv, EM_SETREADONLY, TRUE, 0);
+    g_hBtnCopy = MkBtn(L"COPIAR", cx + w - 85, 346, 85, 32, ID_BTN_COPY);
+    g_hBtnBack = MkBtn(L"VOLTAR", cx, 264, w, 32, ID_BTN_BACK);
+
+    // shared
+    g_hBtnDiscord = MkBtn(L"DISCORD - SUPORTE", cx, 470, w, 34, ID_BTN_DISCORD);
+    g_hLog = MkStatic(L"", cx, 310, w, 150, ID_LOG);
+
+    HWND all[] = { g_hEmail, g_hPass, g_hStatus, g_hLog, g_hEmv };
+    for (auto c : all) SendMessageW(c, WM_SETFONT, (WPARAM)g_Font, TRUE);
+    HWND btns[] = { g_hBtnLogin, g_hBtnDiscord, g_hBtnSignup, g_hBtnMain, g_hBtnCopy, g_hBtnLogout, g_hBtnBack };
+    for (auto b : btns) SendMessageW(b, WM_SETFONT, (WPARAM)g_FontBold, TRUE);
+
+    BOOL dark = TRUE;
+    DwmSetWindowAttribute(hWnd, 20, &dark, sizeof(dark));
+    ApplyScreen();
+}
+
+// ---- WndProc -----------------------------------------------------------------
+static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
 
     case WM_CREATE:
-    {
-        // ---- Create fonts ----
-        g_Font      = CreateFontW(-14, 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET,
-                                  0, 0, CLEARTYPE_QUALITY, 0, L"Segoe UI");
-        g_FontBold  = CreateFontW(-14, 0, 0, 0, FW_BOLD,   0, 0, 0, DEFAULT_CHARSET,
-                                  0, 0, CLEARTYPE_QUALITY, 0, L"Segoe UI");
-        g_FontTitle = CreateFontW(-24, 0, 0, 0, FW_BOLD,   0, 0, 0, DEFAULT_CHARSET,
-                                  0, 0, CLEARTYPE_QUALITY, 0, L"Segoe UI");
-
-        // ---- Brushes ----
-        g_BgBrush    = CreateSolidBrush(CLR_BG);
+        g_Font = CreateFontW(-15, 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET,
+            0, 0, CLEARTYPE_QUALITY, 0, L"Segoe UI");
+        g_FontBold = CreateFontW(-15, 0, 0, 0, FW_BOLD, 0, 0, 0, DEFAULT_CHARSET,
+            0, 0, CLEARTYPE_QUALITY, 0, L"Segoe UI");
+        g_FontTitle = CreateFontW(-30, 0, 0, 0, FW_BOLD, 0, 0, 0, DEFAULT_CHARSET,
+            0, 0, CLEARTYPE_QUALITY, 0, L"Segoe UI");
+        g_FontBig = CreateFontW(-17, 0, 0, 0, FW_BOLD, 0, 0, 0, DEFAULT_CHARSET,
+            0, 0, CLEARTYPE_QUALITY, 0, L"Segoe UI");
+        g_BgBrush = CreateSolidBrush(CLR_BG);
         g_PanelBrush = CreateSolidBrush(CLR_PANEL);
-        g_EditBrush  = CreateSolidBrush(CLR_EDIT_BG);
+        g_EditBrush = CreateSolidBrush(CLR_EDIT_BG);
+        BuildUI(hWnd);
 
-        int y = 70;
-        int pad = 20;
-        int w = 545;
-
-        // DLL path edit
-        CreateWindowW(L"STATIC", L"DLL Path:", WS_CHILD | WS_VISIBLE,
-            pad, y, 60, 20, hWnd, nullptr, nullptr, nullptr);
-        y += 22;
-
-        g_hDllPath = CreateWindowExW(0, L"EDIT", L"",
-            WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL | WS_BORDER,
-            pad, y, w - 90, 28, hWnd, (HMENU)ID_EDIT_DLL, nullptr, nullptr);
-
-        g_hBtnBrowse = CreateWindowW(L"BUTTON", L"...",
-            WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
-            pad + w - 85, y, 70, 28, hWnd, (HMENU)ID_BTN_BROWSE, nullptr, nullptr);
-        y += 40;
-
-        // Status
-        g_hStatus = CreateWindowW(L"STATIC", L"Aguardando...",
-            WS_CHILD | WS_VISIBLE | SS_LEFT,
-            pad, y, w, 20, hWnd, (HMENU)ID_STATIC_STATUS, nullptr, nullptr);
-        y += 28;
-
-        // Inject button
-        g_hBtnInject = CreateWindowW(L"BUTTON", L"INJETAR",
-            WS_CHILD | WS_VISIBLE | BS_OWNERDRAW,
-            pad, y, w, 40, hWnd, (HMENU)ID_BTN_INJECT, nullptr, nullptr);
-        y += 52;
-
-        // Log area
-        g_hLog = CreateWindowExW(0, L"STATIC", L"",
-            WS_CHILD | WS_VISIBLE | SS_LEFT,
-            pad, y, w, 220, hWnd, (HMENU)ID_STATIC_LOG, nullptr, nullptr);
-
-        // Set fonts
-        SendMessageW(g_hDllPath,   WM_SETFONT, (WPARAM)g_Font, TRUE);
-        SendMessageW(g_hStatus,    WM_SETFONT, (WPARAM)g_Font, TRUE);
-        SendMessageW(g_hLog,       WM_SETFONT, (WPARAM)g_Font, TRUE);
-        SendMessageW(g_hBtnInject, WM_SETFONT, (WPARAM)g_FontBold, TRUE);
-        SendMessageW(g_hBtnBrowse, WM_SETFONT, (WPARAM)g_FontBold, TRUE);
-
-        // Auto-find DLL
-        auto found = FindDLLNextToExe();
-        if (!found.empty()) {
-            SetWindowTextW(g_hDllPath, found.c_str());
-            g_DllPathStr = found;
-            Log(L"[INFO] DLL encontrada automaticamente.");
+        // Auto-login via refresh token salvo
+        {
+            std::string rt = LoadRefresh();
+            if (!rt.empty()) {
+                Log(L"[..] Sessao salva encontrada, entrando...");
+                std::thread([rt, hWnd] {
+                    g.busy = true;
+                    if (DoRefresh(rt)) {
+                        std::wstring label;
+                        if (CheckLicense(label)) { g.licensed = true; g.licLabel = label; }
+                        else g.licLabel = label;
+                        g.screen = SCR_MAIN;
+                        PostMessageW(hWnd, WM_APP + 1, 0, 0);
+                    }
+                    g.busy = false;
+                }).detach();
+            }
         }
+        return 0;
 
-        // Dark title bar (Win10/11)
-        BOOL dark = TRUE;
-        DwmSetWindowAttribute(hWnd, 20, &dark, sizeof(dark));
+    case WM_APP + 1: // login ok -> main
+        ApplyScreen();
+        SetWindowTextW(g_hStatus, g.licLabel.c_str());
+        Log(g.licensed ? L"[OK] Licenca ativa." : L"[..] Sem licenca — compre para liberar.");
+        return 0;
 
-        Log(L"[C4pt0r] Injector pronto.");
-        Log(L"[INFO] Abra o FiveM e entre num servidor.");
-        Log(L"[INFO] Depois clique INJETAR.");
+    case WM_APP + 2: // erro
+        SetWindowTextW(g_hStatus, g.lastErr.c_str());
+        Log((std::wstring(L"[ERRO] ") + g.lastErr).c_str());
+        if (g.screen == SCR_PAY) { g.screen = SCR_MAIN; ApplyScreen(); }
+        InvalidateRect(hWnd, nullptr, TRUE);
+        return 0;
+
+    case WM_APP + 3: // re-check done
+        ApplyScreen();
+        SetWindowTextW(g_hStatus, g.licLabel.c_str());
+        return 0;
+
+    case WM_APP + 4: // pix gerado -> tela de pagamento
+    {
+        ApplyScreen();
+        SetWindowTextW(g_hStatus, L"Escaneie o QR ou use copia-e-cola");
+        SetWindowTextW(g_hEmv, ToWide(g.qrEmv).c_str());
+        Log(L"[OK] PIX gerado. Aguardando pagamento...");
+        // QR via servico publico -> PNG -> WIC
+        std::thread([] {
+            std::string url = "https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=";
+            // urlencode do EMV
+            std::string enc;
+            for (char c : g.qrEmv) {
+                if (isalnum((unsigned char)c) || c == '-' || c == '_' || c == '.' || c == '~') enc += c;
+                else { char b[4]; snprintf(b, 4, "%%%02X", (unsigned char)c); enc += b; }
+            }
+            auto r = HttpDownload(url + enc);
+            if (r.status == 200 && r.body.size() > 100) {
+                HBITMAP b = PngToBitmap(r.body);
+                if (b) {
+                    if (g_QrBitmap) DeleteObject(g_QrBitmap);
+                    g_QrBitmap = b;
+                    PostMessageW(g_hWnd, WM_APP + 7, 0, 0);
+                }
+            }
+        }).detach();
+        // poll do pagamento
+        std::thread(ThreadPollOrder).detach();
         return 0;
     }
 
+    case WM_APP + 5: // pago!
+        SetWindowTextW(g_hStatus, L"PAGO! Licenca liberada.");
+        Log(L"[OK] Pagamento confirmado. Pode injetar!");
+        g.screen = SCR_MAIN;
+        ApplyScreen();
+        SetWindowTextW(g_hStatus, g.licLabel.c_str());
+        return 0;
+
+    case WM_APP + 6: // injetado
+        SetWindowTextW(g_hStatus, L"Injetado! Aperte F9 no jogo.");
+        Log(L"[OK] DLL injetada com sucesso. F9 abre o menu.");
+        return 0;
+
+    case WM_APP + 7: // QR pronto
+        InvalidateRect(g_hQrBox, nullptr, TRUE);
+        return 0;
+
     case WM_PAINT:
     {
-        PAINTSTRUCT ps;
-        HDC hdc = BeginPaint(hWnd, &ps);
-
-        // Background
+        PAINTSTRUCT ps; HDC hdc = BeginPaint(hWnd, &ps);
         FillRect(hdc, &ps.rcPaint, g_BgBrush);
-
-        // Title
         SetBkMode(hdc, TRANSPARENT);
         SetTextColor(hdc, CLR_ACCENT);
         SelectObject(hdc, g_FontTitle);
-        TextOutW(hdc, 16, 16, L"C4pt0r Cheats", 13);
-
-        // Subtitle
+        TextOutW(hdc, 28, 20, L"C4PT0R", 6);
         SetTextColor(hdc, CLR_DIM);
         SelectObject(hdc, g_Font);
-        TextOutW(hdc, 16, 46, L"FiveM Injector v1.0", 19);
-
-        // Accent line under title
+        int s = g.screen.load();
+        const wchar_t* sub = s == SCR_LOGIN ? L"Entre com sua conta" :
+            s == SCR_PAY ? L"Pagamento via PIX" : L"Loader v2.0";
+        TextOutW(hdc, 30, 56, sub, (int)wcslen(sub));
         HPEN pen = CreatePen(PS_SOLID, 2, CLR_ACCENT);
         SelectObject(hdc, pen);
-        MoveToEx(hdc, 16, 65, nullptr);
-        LineTo(hdc, 200, 65);
+        MoveToEx(hdc, 30, 80, nullptr); LineTo(hdc, 160, 80);
         DeleteObject(pen);
 
+        // QR bitmap
+        if (s == SCR_PAY && g_QrBitmap) {
+            HDC mem = CreateCompatibleDC(hdc);
+            SelectObject(mem, g_QrBitmap);
+            RECT rc; GetClientRect(g_hQrBox, &rc);
+            POINT pt{ rc.left, rc.top };
+            ClientToScreen(g_hQrBox, &pt); ScreenToClient(hWnd, &pt);
+            BitBlt(hdc, pt.x, pt.y, rc.right - rc.left, rc.bottom - rc.top, mem, 0, 0, SRCCOPY);
+            DeleteDC(mem);
+        }
         EndPaint(hWnd, &ps);
         return 0;
     }
 
     case WM_CTLCOLORSTATIC:
     {
-        HDC hdc = (HDC)wParam;
+        HDC hdc = (HDC)wp;
         SetBkMode(hdc, TRANSPARENT);
-        HWND ctrl = (HWND)lParam;
-        if (ctrl == g_hStatus) {
-            SetTextColor(hdc, g_Injected ? CLR_SUCCESS : CLR_ACCENT);
-        } else {
-            SetTextColor(hdc, CLR_TEXT);
-        }
+        HWND c = (HWND)lp;
+        if (c == g_hStatus) {
+            SetTextColor(hdc, g.licensed || g.injected ? CLR_OK : CLR_GOLD);
+            SelectObject(hdc, g_FontBig);
+        } else SetTextColor(hdc, CLR_TEXT);
         return (LRESULT)g_BgBrush;
     }
-
     case WM_CTLCOLOREDIT:
     {
-        HDC hdc = (HDC)wParam;
-        SetBkColor(hdc, CLR_EDIT_BG);
-        SetTextColor(hdc, CLR_TEXT);
+        HDC hdc = (HDC)wp;
+        SetBkColor(hdc, CLR_EDIT_BG); SetTextColor(hdc, CLR_TEXT);
         return (LRESULT)g_EditBrush;
     }
-
     case WM_DRAWITEM:
-    {
-        auto* dis = reinterpret_cast<LPDRAWITEMSTRUCT>(lParam);
-        DrawButton(dis);
+        DrawButton((LPDRAWITEMSTRUCT)lp);
         return TRUE;
-    }
 
     case WM_COMMAND:
     {
-        int id = LOWORD(wParam);
+        int id = LOWORD(wp);
+        if (g.busy) return 0;
 
-        if (id == ID_BTN_BROWSE) {
-            auto path = BrowseForDLL(hWnd);
-            if (!path.empty()) {
-                SetWindowTextW(g_hDllPath, path.c_str());
-                g_DllPathStr = path;
-                Log(L"[INFO] DLL selecionada.");
+        if (id == ID_BTN_SIGNUP) ShellExecuteW(nullptr, L"open", STORE_URL, nullptr, nullptr, SW_SHOW);
+        if (id == ID_BTN_DISCORD) ShellExecuteW(nullptr, L"open", DISCORD_URL, nullptr, nullptr, SW_SHOW);
+
+        if (id == ID_BTN_LOGIN) {
+            wchar_t e[256], p[256];
+            GetWindowTextW(g_hEmail, e, 256); GetWindowTextW(g_hPass, p, 256);
+            auto narrow = [](const wchar_t* w) {
+                char buf[512]; WideCharToMultiByte(CP_UTF8, 0, w, -1, buf, 512, nullptr, nullptr);
+                return std::string(buf);
+            };
+            if (!*e || !*p) { SetWindowTextW(g_hStatus, L"Preencha email e senha."); return 0; }
+            SetWindowTextW(g_hStatus, L"Entrando...");
+            Log(L"[..] Autenticando...");
+            std::thread(ThreadLogin, narrow(e), narrow(p)).detach();
+        }
+
+        if (id == ID_BTN_LOGOUT) {
+            ClearSession();
+            g.accessToken.clear(); g.licensed = false;
+            g.screen = SCR_LOGIN;
+            ApplyScreen();
+            Log(L"[..] Desconectado.");
+        }
+
+        if (id == ID_BTN_BACK) {
+            g.screen = SCR_MAIN;
+            ApplyScreen();
+        }
+
+        if (id == ID_BTN_COPY) {
+            if (OpenClipboard(hWnd)) {
+                EmptyClipboard();
+                std::wstring w = ToWide(g.qrEmv);
+                size_t sz = (w.size() + 1) * sizeof(wchar_t);
+                HGLOBAL h = GlobalAlloc(GMEM_MOVEABLE, sz);
+                memcpy(GlobalLock(h), w.c_str(), sz); GlobalUnlock(h);
+                SetClipboardData(CF_UNICODETEXT, h);
+                CloseClipboard();
+                Log(L"[OK] Codigo PIX copiado.");
             }
         }
 
-        if (id == ID_BTN_INJECT) {
-            if (g_Injected) {
-                Log(L"[AVISO] Ja foi injetado nesta sessao.");
-                return 0;
-            }
-
-            // Get DLL path
-            wchar_t pathBuf[MAX_PATH];
-            GetWindowTextW(g_hDllPath, pathBuf, MAX_PATH);
-            g_DllPathStr = pathBuf;
-
-            if (g_DllPathStr.empty()) {
-                Log(L"[ERRO] Selecione a DLL primeiro.");
-                return 0;
-            }
-
-            if (!std::filesystem::exists(g_DllPathStr)) {
-                Log(L"[ERRO] Arquivo DLL nao encontrado.");
-                return 0;
-            }
-
-            // Find FiveM
-            SetWindowTextW(g_hStatus, L"Procurando FiveM...");
-            Log(L"[...] Procurando processo FiveM...");
-            InvalidateRect(hWnd, nullptr, TRUE);
-            UpdateWindow(hWnd);
-
-            auto procs = FindFiveMProcesses();
-            if (procs.empty()) {
-                SetWindowTextW(g_hStatus, L"FiveM nao encontrado!");
-                Log(L"[ERRO] FiveM_GTAProcess nao encontrado.");
-                Log(L"[INFO] Abra o FiveM e entre num servidor primeiro.");
-                InvalidateRect(hWnd, nullptr, TRUE);
-                return 0;
-            }
-
-            auto& target = procs[0];
-            wchar_t logBuf[256];
-            swprintf_s(logBuf, L"[OK] Processo encontrado: %s (PID %lu)",
-                       target.name.c_str(), target.pid);
-            Log(logBuf);
-
-            // Inject
-            SetWindowTextW(g_hStatus, L"Injetando...");
-            Log(L"[...] Injetando DLL...");
-            InvalidateRect(hWnd, nullptr, TRUE);
-            UpdateWindow(hWnd);
-
-            bool success = InjectDLL(target.pid, g_DllPathStr);
-
-            if (success) {
-                SetWindowTextW(g_hStatus, L"Injetado com sucesso!");
-                Log(L"[OK] DLL injetada! Aperte F9 no jogo.");
-                g_Injected = true;
+        if (id == ID_BTN_MAIN) {
+            if (g.screen == SCR_PAY) {
+                // re-check manual
+                std::thread(ThreadPollOrder).detach();
+                Log(L"[..] Verificando pagamento...");
+            } else if (g.licensed) {
+                DWORD pid = FindFiveMPid();
+                if (!pid) {
+                    SetWindowTextW(g_hStatus, L"Abra o FiveM e entre num servidor.");
+                    Log(L"[ERRO] FiveM_GTAProcess nao encontrado.");
+                } else {
+                    SetWindowTextW(g_hStatus, L"Baixando e injetando...");
+                    Log(L"[..] Baixando DLL assinada...");
+                    std::thread(ThreadDownloadInject).detach();
+                }
             } else {
-                SetWindowTextW(g_hStatus, L"Falha na injecao!");
-                Log(L"[ERRO] Injecao falhou. Tente como admin.");
+                SetWindowTextW(g_hStatus, L"Gerando PIX...");
+                std::thread(ThreadBuyPix).detach();
             }
-            InvalidateRect(hWnd, nullptr, TRUE);
         }
         return 0;
     }
 
     case WM_DESTROY:
-        DeleteObject(g_BgBrush);
-        DeleteObject(g_PanelBrush);
-        DeleteObject(g_EditBrush);
-        DeleteObject(g_Font);
-        DeleteObject(g_FontBold);
-        DeleteObject(g_FontTitle);
+        if (g_QrBitmap) DeleteObject(g_QrBitmap);
+        DeleteObject(g_BgBrush); DeleteObject(g_PanelBrush); DeleteObject(g_EditBrush);
+        DeleteObject(g_Font); DeleteObject(g_FontBold); DeleteObject(g_FontTitle); DeleteObject(g_FontBig);
         PostQuitMessage(0);
         return 0;
     }
-
-    return DefWindowProcW(hWnd, msg, wParam, lParam);
+    return DefWindowProcW(hWnd, msg, wp, lp);
 }
 
-// ---- Entry point --------------------------------------------------------
-int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow) {
+// ---- Entry -------------------------------------------------------------------
+int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nCmdShow) {
+    CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+
     WNDCLASSEXW wc{};
-    wc.cbSize        = sizeof(wc);
-    wc.style         = CS_HREDRAW | CS_VREDRAW;
-    wc.lpfnWndProc   = WndProc;
-    wc.hInstance      = hInstance;
-    wc.hCursor       = LoadCursorW(nullptr, IDC_ARROW);
-    wc.lpszClassName = L"C4pt0rInjector";
-    wc.hbrBackground = nullptr;  // we paint our own bg
+    wc.cbSize = sizeof(wc);
+    wc.lpfnWndProc = WndProc;
+    wc.hInstance = hInst;
+    wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+    wc.lpszClassName = L"C4pt0rLoader";
     RegisterClassExW(&wc);
 
-    int winW = 600, winH = 580;
-    int screenW = GetSystemMetrics(SM_CXSCREEN);
-    int screenH = GetSystemMetrics(SM_CYSCREEN);
-
-    g_hWnd = CreateWindowExW(
-        0, wc.lpszClassName, L"C4pt0r Cheats — Injector",
+    int winW = 460, winH = 560;
+    g_hWnd = CreateWindowExW(0, wc.lpszClassName, L"C4pt0r Loader",
         WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
-        (screenW - winW) / 2, (screenH - winH) / 2,
-        winW, winH,
-        nullptr, nullptr, hInstance, nullptr);
+        (GetSystemMetrics(SM_CXSCREEN) - winW) / 2, (GetSystemMetrics(SM_CYSCREEN) - winH) / 2,
+        winW, winH, nullptr, nullptr, hInst, nullptr);
 
     ShowWindow(g_hWnd, nCmdShow);
     UpdateWindow(g_hWnd);
 
-    MSG msg;
-    while (GetMessageW(&msg, nullptr, 0, 0)) {
-        TranslateMessage(&msg);
-        DispatchMessageW(&msg);
-    }
-    return static_cast<int>(msg.wParam);
+    MSG m;
+    while (GetMessageW(&m, nullptr, 0, 0)) { TranslateMessage(&m); DispatchMessageW(&m); }
+    CoUninitialize();
+    return (int)m.wParam;
 }

@@ -5,9 +5,8 @@
 
 CONTEUDO DO PACOTE
 --------------------------------------------------------------------
-  C4pt0r-Injector.exe ... o programa que injeta o menu no jogo
-  C4pt0r-Cheat.dll ...... o mod menu em si (nao apague nem renomeie)
-  Atualizar.bat ......... atualizador automatico
+  C4pt0r-Loader.exe ..... o programa que baixa e injeta o mod menu
+  Atualizar.bat ......... atualizador automatico do loader
   version.txt ........... versao instalada (nao mexa)
 
 
@@ -19,13 +18,17 @@ PASSO A PASSO - PRIMEIRO USO
   2. Abra o FiveM normalmente e entre num servidor.
      Espere spawnar/estar andando no jogo.
 
-  3. Clique com o botao direito em "C4pt0r-Injector.exe"
+  3. Clique com o botao direito em "C4pt0r-Loader.exe"
      e escolha "Executar como administrador".
 
-  4. O injetor ja encontra a DLL sozinho. Clique em INJETAR.
+  4. Faca login com o email e senha da sua conta C4pt0r
+     (a mesma que voce usou pra comprar na loja).
 
-  5. Volte pro jogo e aperte F9 para abrir/fechar o menu.
+  5. Clique em INJETAR. Volte pro jogo e aperte F9.
      END fecha/descarrega o cheat.
+
+  >> Nao tem conta? Clique em "CRIAR CONTA" ou em COMPRAR no loader
+     e pague via PIX ali mesmo — liberacao automatica.
 
 
 CONTROLES DO MENU
@@ -36,9 +39,8 @@ CONTROLES DO MENU
 
 ATUALIZACOES
 --------------------------------------------------------------------
-  Sempre que sair versao nova, abra "Atualizar.bat" (pode ser como
-  usuario normal). Ele baixa e instala sozinho por cima da pasta.
-  Feche o injetor e o FiveM antes de atualizar.
+  Abra "Atualizar.bat" de vez em quando — ele baixa a versao nova
+  do loader sozinho. Feche o loader e o FiveM antes de atualizar.
 
 
 PROBLEMAS COMUNS
@@ -46,25 +48,29 @@ PROBLEMAS COMUNS
   "FiveM nao encontrado"
       -> voce tem que estar DENTRO de um servidor, nao no menu do FiveM.
 
-  "OpenProcess falhou" / injecao falha
-      -> rode o injetor como ADMINISTRADOR.
+  "Sem licenca ativa"
+      -> sua conta nao tem compra aprovada. Compre pelo botao COMPRAR
+         no proprio loader ou na loja.
+
+  "Licenca vinculada a outro computador"
+      -> a licenca amarra no primeiro PC usado. Pecou desbloqueio no
+         Discord.
+
+  Injecao falhou
+      -> rode o loader como ADMINISTRADOR.
 
   Antivirus bloqueou
-      -> adicione a pasta do C4pt0r nas exclusoes do antivirus.
-         (mod menus sempre aparecem como falso positivo)
+      -> adicione a pasta nas exclusoes (falso positivo comum em mod).
 
   O jogo fechou depois de injetar
-      -> versao do FiveM pode ter atualizado. Rode o Atualizar.bat;
-         se nao tiver update ainda, avise no Discord.
-
-  Menu nao abre com F9
-      -> confira se injetou DEPOIS de entrar no servidor.
+      -> FiveM pode ter atualizado. Rode o Atualizar.bat; se nao tiver
+         update, avise no Discord.
 
 
 SUPORTE
 --------------------------------------------------------------------
   Discord: https://discord.gg/PhkbhxMBy
-  YouTube: C4pt0r - Mods
+  Loja:    https://c4pt0r-store.eletrify.me
 
 
 AVISO

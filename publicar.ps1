@@ -47,12 +47,13 @@ Write-Host '[2/4] Montando pacote do cliente...' -ForegroundColor Yellow
 if (Test-Path $StageDir) { Remove-Item $StageDir -Recurse -Force }
 New-Item -ItemType Directory -Path $StageDir | Out-Null
 
-Copy-Item (Join-Path $BuildDir 'C4pt0r-Injector.exe') $StageDir
-Copy-Item (Join-Path $BuildDir 'C4pt0r-Cheat.dll')    $StageDir
+Copy-Item (Join-Path $BuildDir 'C4pt0r-Injector.exe') (Join-Path $StageDir 'C4pt0r-Loader.exe')
 Copy-Item (Join-Path $DistDir  'Atualizar.bat')       $StageDir
 Copy-Item (Join-Path $DistDir  'updater.ps1')         $StageDir
 Copy-Item (Join-Path $DistDir  'LEIA-ME.txt')         $StageDir
 Copy-Item $verFile (Join-Path $StageDir 'version.txt')
+# ATENCAO: a DLL NAO vai no pacote — o loader baixa ela do Supabase
+# depois do login. Sem licenca, ninguem tem acesso ao payload.
 
 $clientZip = Join-Path $OutDir "C4pt0r-Mod-Menu-v$Version.zip"
 $updateZip = Join-Path $OutDir 'C4pt0r-Update.zip'
@@ -87,6 +88,23 @@ if ($NoPush) {
     Pop-Location
     if (-not $pushOk) { throw 'Push pro repo de updates falhou.' }
     Write-Host '  Update publicado!' -ForegroundColor Green
+}
+
+# --- Upload do payload + pacote pro Supabase Storage -------------------------
+if ($env:SUPABASE_SERVICE_ROLE_KEY) {
+    Write-Host '[..] Subindo payload pro Supabase Storage...' -ForegroundColor Yellow
+    $SU = 'https://bzthdklqvjtutkeiimpq.supabase.co'
+    $SH = @{ Authorization = "Bearer $env:SUPABASE_SERVICE_ROLE_KEY"; apikey = $env:SUPABASE_SERVICE_ROLE_KEY }
+    Invoke-RestMethod -Method Post -Uri "$SU/storage/v1/object/downloads/loaders/c4pt0r.dll" `
+        -Headers ($SH + @{ 'Content-Type' = 'application/octet-stream'; 'x-upsert' = 'true' }) `
+        -InFile (Join-Path $BuildDir 'C4pt0r-Cheat.dll') | Out-Null
+    Invoke-RestMethod -Method Post -Uri "$SU/storage/v1/object/downloads/loaders/c4pt0r.zip" `
+        -Headers ($SH + @{ 'Content-Type' = 'application/zip'; 'x-upsert' = 'true' }) `
+        -InFile $updateZip | Out-Null
+    Write-Host '  loaders/c4pt0r.dll + c4pt0r.zip atualizados no Storage.' -ForegroundColor Green
+} else {
+    Write-Host '[..] SUPABASE_SERVICE_ROLE_KEY nao definida — pulando upload do Storage.' -ForegroundColor Yellow
+    Write-Host '     (suba manualmente: build/C4pt0r-Cheat.dll -> downloads/loaders/c4pt0r.dll)' -ForegroundColor DarkGray
 }
 
 # --- 4/4. Resumo ----------------------------------------------------------------
