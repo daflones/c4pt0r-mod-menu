@@ -68,6 +68,7 @@ struct Shared {
 
 // ---- Controls --------------------------------------------------------------
 static HWND g_hWnd, g_hEmail, g_hPass, g_hStatus, g_hLog, g_hQrBox, g_hEmv;
+static HWND g_hLblEmail, g_hLblPass;
 static HWND g_hBtnLogin, g_hBtnDiscord, g_hBtnSignup, g_hBtnMain, g_hBtnCopy,
             g_hBtnLogout, g_hBtnBack;
 static HBRUSH g_BgBrush, g_PanelBrush, g_EditBrush;
@@ -272,10 +273,34 @@ static HBITMAP PngToBitmap(const std::string& bytes) {
 static void ApplyScreen() {
     int s = g.screen.load();
     auto sw = [&](HWND h, bool v) { ShowWindow(h, v ? SW_SHOW : SW_HIDE); };
+    auto mv = [&](HWND h, int x, int y, int w, int ht) { MoveWindow(h, x, y, w, ht, TRUE); };
     bool login = s == SCR_LOGIN, main = s == SCR_MAIN, pay = s == SCR_PAY;
-    sw(g_hEmail, login); sw(g_hPass, login); sw(g_hBtnLogin, login); sw(g_hBtnSignup, login);
-    sw(g_hBtnMain, main || pay); sw(g_hBtnLogout, main); sw(g_hBtnBack, pay);
-    sw(g_hQrBox, pay); sw(g_hEmv, pay); sw(g_hBtnCopy, pay);
+
+    // shared
+    mv(g_hStatus, 40, 92, 380, 22);
+    mv(g_hLog, 40, 400, 380, 66);
+    mv(g_hBtnDiscord, 40, 478, 380, 30);
+    sw(g_hStatus, true); sw(g_hLog, !pay); sw(g_hBtnDiscord, true);
+
+    // login
+    sw(g_hLblEmail, login); sw(g_hEmail, login);
+    sw(g_hLblPass, login); sw(g_hPass, login);
+    sw(g_hBtnLogin, login); sw(g_hBtnSignup, login);
+
+    // main
+    sw(g_hBtnMain, main || pay); sw(g_hBtnLogout, main);
+    if (main) { mv(g_hBtnMain, 40, 130, 380, 46); mv(g_hBtnLogout, 40, 188, 380, 32); }
+
+    // pay
+    sw(g_hQrBox, pay); sw(g_hEmv, pay); sw(g_hBtnCopy, pay); sw(g_hBtnBack, pay);
+    if (pay) {
+        mv(g_hQrBox, 125, 98, 210, 210);
+        mv(g_hEmv, 40, 316, 292, 30);
+        mv(g_hBtnCopy, 340, 316, 80, 30);
+        mv(g_hBtnMain, 40, 356, 380, 36);
+        mv(g_hBtnBack, 40, 426, 380, 28);
+    }
+
     SetWindowTextW(g_hBtnMain, pay ? L"VERIFICAR PAGAMENTO" :
         (g.licensed ? L"INJETAR" : L"COMPRAR AGORA"));
     InvalidateRect(g_hWnd, nullptr, TRUE);
@@ -425,33 +450,33 @@ static HWND MkStatic(const wchar_t* t, int x, int y, int w, int h, int id = 0) {
 
 // ---- WM_CREATE: build all controls hidden, ApplyScreen manages ---------------
 static void BuildUI(HWND hWnd) {
-    int cx = 40, w = 460 - 80;
+    int cx = 40, w = 380;
 
     // LOGIN
-    MkStatic(L"Email", cx, 92, w, 18);
-    g_hEmail = MkEdit(cx, 112, w, ID_EMAIL);
-    MkStatic(L"Senha", cx, 152, w, 18);
-    g_hPass = MkEdit(cx, 172, w, ID_PASS, true);
-    g_hBtnLogin = MkBtn(L"ENTRAR", cx, 216, w, 42, ID_BTN_LOGIN);
-    g_hBtnSignup = MkBtn(L"CRIAR CONTA", cx, 264, w, 32, ID_BTN_SIGNUP);
+    g_hLblEmail = MkStatic(L"Email", cx, 100, w, 18);
+    g_hEmail = MkEdit(cx, 118, w, ID_EMAIL);
+    g_hLblPass = MkStatic(L"Senha", cx, 158, w, 18);
+    g_hPass = MkEdit(cx, 176, w, ID_PASS, true);
+    g_hBtnLogin = MkBtn(L"ENTRAR", cx, 222, w, 42, ID_BTN_LOGIN);
+    g_hBtnSignup = MkBtn(L"CRIAR CONTA", cx, 272, w, 32, ID_BTN_SIGNUP);
 
-    // MAIN
-    g_hStatus = MkStatic(L"", cx, 96, w, 20, ID_STATUS);
-    g_hBtnMain = MkBtn(L"INJETAR", cx, 128, w, 46, ID_BTN_MAIN);
-    g_hBtnLogout = MkBtn(L"SAIR", cx, 264, w, 32, ID_BTN_LOGOUT);
+    // MAIN / shared
+    g_hStatus = MkStatic(L"", cx, 92, w, 22, ID_STATUS);
+    g_hBtnMain = MkBtn(L"INJETAR", cx, 130, w, 46, ID_BTN_MAIN);
+    g_hBtnLogout = MkBtn(L"SAIR", cx, 188, w, 32, ID_BTN_LOGOUT);
 
     // PAY
-    g_hQrBox = MkStatic(L"", cx + 65, 118, 220, 220, ID_QRBOX);
-    g_hEmv = MkEdit(cx, 346, w - 90, ID_EMV);
+    g_hQrBox = MkStatic(L"", 125, 98, 210, 210, ID_QRBOX);
+    g_hEmv = MkEdit(cx, 316, w - 88, ID_EMV);
     SendMessageW(g_hEmv, EM_SETREADONLY, TRUE, 0);
-    g_hBtnCopy = MkBtn(L"COPIAR", cx + w - 85, 346, 85, 32, ID_BTN_COPY);
-    g_hBtnBack = MkBtn(L"VOLTAR", cx, 264, w, 32, ID_BTN_BACK);
+    g_hBtnCopy = MkBtn(L"COPIAR", 340, 316, 80, 30, ID_BTN_COPY);
+    g_hBtnBack = MkBtn(L"VOLTAR", cx, 426, w, 28, ID_BTN_BACK);
 
     // shared
-    g_hBtnDiscord = MkBtn(L"DISCORD - SUPORTE", cx, 470, w, 34, ID_BTN_DISCORD);
-    g_hLog = MkStatic(L"", cx, 310, w, 150, ID_LOG);
+    g_hBtnDiscord = MkBtn(L"DISCORD - SUPORTE", cx, 478, w, 30, ID_BTN_DISCORD);
+    g_hLog = MkStatic(L"", cx, 400, w, 66, ID_LOG);
 
-    HWND all[] = { g_hEmail, g_hPass, g_hStatus, g_hLog, g_hEmv };
+    HWND all[] = { g_hEmail, g_hPass, g_hStatus, g_hLog, g_hEmv, g_hLblEmail, g_hLblPass };
     for (auto c : all) SendMessageW(c, WM_SETFONT, (WPARAM)g_Font, TRUE);
     HWND btns[] = { g_hBtnLogin, g_hBtnDiscord, g_hBtnSignup, g_hBtnMain, g_hBtnCopy, g_hBtnLogout, g_hBtnBack };
     for (auto b : btns) SendMessageW(b, WM_SETFONT, (WPARAM)g_FontBold, TRUE);
@@ -466,6 +491,7 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
 
     case WM_CREATE:
+        g_hWnd = hWnd; // precisa antes de criar os filhos (CreateWindowExW ainda nao retornou)
         g_Font = CreateFontW(-15, 0, 0, 0, FW_NORMAL, 0, 0, 0, DEFAULT_CHARSET,
             0, 0, CLEARTYPE_QUALITY, 0, L"Segoe UI");
         g_FontBold = CreateFontW(-15, 0, 0, 0, FW_BOLD, 0, 0, 0, DEFAULT_CHARSET,
