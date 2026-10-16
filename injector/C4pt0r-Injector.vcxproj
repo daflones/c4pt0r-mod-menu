@@ -67,6 +67,7 @@
 
   <ItemGroup>
     <ClCompile Include="main.cpp" />
+    <ClCompile Include="deps\qrcodegen.cpp" />
     <ClCompile Include="..\cheat\deps\imgui\imgui.cpp" />
     <ClCompile Include="..\cheat\deps\imgui\imgui_draw.cpp" />
     <ClCompile Include="..\cheat\deps\imgui\imgui_tables.cpp" />

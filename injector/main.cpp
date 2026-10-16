@@ -11,7 +11,6 @@
 #include <TlHelp32.h>
 #include <dwmapi.h>
 #include <wincrypt.h>
-#include <wincodec.h>
 #include <ShlObj.h>
 #include <Shlwapi.h>
 #include <Shellapi.h>
@@ -24,6 +23,7 @@
 #include <thread>
 #include <mutex>
 #include "net.h"
+#include "deps/qrcodegen.hpp"
 
 #include "imgui.h"
 #include "imgui_impl_win32.h"
@@ -38,7 +38,6 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "shell32.lib")
 #pragma comment(lib, "crypt32.lib")
-#pragma comment(lib, "windowscodecs.lib")
 #pragma comment(lib, "ole32.lib")
 #pragma comment(lib, "shlwapi.lib")
 
@@ -353,63 +352,39 @@ static bool InjectDLL(DWORD pid, const std::wstring& dllPath) {
     return code != 0;
 }
 
-// ---- PNG -> D3D texture ---------------------------------------------------------
-static bool PngToTexture(const std::string& bytes, ID3D11ShaderResourceView** srv, int* ow, int* oh) {
-    IWICImagingFactory* fac = nullptr;
-    if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER,
-        IID_IWICImagingFactory, (void**)&fac))) return false;
-    IStream* stm = SHCreateMemStream((const BYTE*)bytes.data(), (UINT)bytes.size());
-    IWICBitmapDecoder* dec = nullptr;
-    bool ok = false;
-    if (stm && SUCCEEDED(fac->CreateDecoderFromStream(stm, nullptr, WICDecodeMetadataCacheOnLoad, &dec))) {
-        IWICBitmapFrameDecode* frame = nullptr;
-        if (SUCCEEDED(dec->GetFrame(0, &frame))) {
-            IWICFormatConverter* conv = nullptr;
-            if (SUCCEEDED(fac->CreateFormatConverter(&conv)) &&
-                SUCCEEDED(conv->Initialize(frame, GUID_WICPixelFormat32bppBGRA,
-                    WICBitmapDitherTypeNone, nullptr, 0.0, WICBitmapPaletteTypeCustom))) {
-                UINT w = 0, hgt = 0; conv->GetSize(&w, &hgt);
-                std::vector<BYTE> px(w * hgt * 4);
-                if (SUCCEEDED(conv->CopyPixels(nullptr, w * 4, (UINT)px.size(), px.data()))) {
-                    D3D11_TEXTURE2D_DESC td{};
-                    td.Width = w; td.Height = hgt; td.MipLevels = 1; td.ArraySize = 1;
-                    td.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
-                    td.SampleDesc.Count = 1;
-                    td.Usage = D3D11_USAGE_DEFAULT;
-                    td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
-                    D3D11_SUBRESOURCE_DATA sd{ px.data(), w * 4, 0 };
-                    ID3D11Texture2D* tex = nullptr;
-                    if (SUCCEEDED(g_pd3dDevice->CreateTexture2D(&td, &sd, &tex))) {
-                        D3D11_SHADER_RESOURCE_VIEW_DESC sv{};
-                        sv.Format = td.Format;
-                        sv.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
-                        sv.Texture2D.MipLevels = 1;
-                        if (SUCCEEDED(g_pd3dDevice->CreateShaderResourceView(tex, &sv, srv))) {
-                            *ow = (int)w; *oh = (int)hgt;
-                            ok = true;
-                        }
-                        tex->Release();
+// ---- QR PIX -> textura D3D (gerado localmente, sem rede) --------------------------
+static bool QrToTexture(const std::string& emv, ID3D11ShaderResourceView** srv, int* ow, int* oh) {
+    using qrcodegen::QrCode;
+    QrCode qr = QrCode::encodeText(emv.c_str(), QrCode::Ecc::LOW);
+    const int border = 4, scale = 8;
+    int dim = (qr.getSize() + border * 2) * scale;
+    std::vector<BYTE> px((size_t)dim * dim * 4, 255);   // branco opaco
+    for (int y = 0; y < qr.getSize(); y++)
+        for (int x = 0; x < qr.getSize(); x++)
+            if (qr.getModule(x, y))
+                for (int dy = 0; dy < scale; dy++)
+                    for (int dx = 0; dx < scale; dx++) {
+                        size_t off = ((size_t)((y + border) * scale + dy) * dim
+                            + (x + border) * scale + dx) * 4;
+                        px[off] = px[off + 1] = px[off + 2] = 0;   // modulo preto
                     }
-                }
-            }
-            if (conv) conv->Release();
-            frame->Release();
-        }
-        dec->Release();
-    }
-    if (stm) stm->Release();
-    fac->Release();
+    D3D11_TEXTURE2D_DESC td{};
+    td.Width = dim; td.Height = dim; td.MipLevels = 1; td.ArraySize = 1;
+    td.Format = DXGI_FORMAT_B8G8R8A8_UNORM;
+    td.SampleDesc.Count = 1;
+    td.Usage = D3D11_USAGE_DEFAULT;
+    td.BindFlags = D3D11_BIND_SHADER_RESOURCE;
+    D3D11_SUBRESOURCE_DATA sd{ px.data(), (UINT)(dim * 4), 0 };
+    ID3D11Texture2D* tex = nullptr;
+    if (FAILED(g_pd3dDevice->CreateTexture2D(&td, &sd, &tex))) return false;
+    D3D11_SHADER_RESOURCE_VIEW_DESC sv{};
+    sv.Format = td.Format;
+    sv.ViewDimension = D3D11_SRV_DIMENSION_TEXTURE2D;
+    sv.Texture2D.MipLevels = 1;
+    bool ok = SUCCEEDED(g_pd3dDevice->CreateShaderResourceView(tex, &sv, srv));
+    if (ok) { *ow = *oh = dim; }
+    tex->Release();
     return ok;
-}
-
-static std::string B64Decode(const std::string& b64) {
-    DWORD need = 0;
-    if (!CryptStringToBinaryA(b64.c_str(), (DWORD)b64.size(), CRYPT_STRING_BASE64,
-        nullptr, &need, nullptr, nullptr) || !need) return "";
-    std::vector<BYTE> bin(need);
-    if (!CryptStringToBinaryA(b64.c_str(), (DWORD)b64.size(), CRYPT_STRING_BASE64,
-        bin.data(), &need, nullptr, nullptr)) return "";
-    return std::string((char*)bin.data(), need);
 }
 
 // ---- Worker threads ---------------------------------------------------------------
@@ -466,33 +441,18 @@ static void ThreadBuyPix(std::string slug) {
     if (j["ok"].truthy() && !j["qr_code"].str().empty()) {
         g.orderId = j["order_id"].str();
         g.qrEmv = j["qr_code"].str();
-        g.qrB64 = j["qr_image"].str();
         g.paySlug = slug;
         g.paid = false;
+        // QR gerado localmente do codigo PIX — instantaneo, sem depender de rede
+        {
+            ID3D11ShaderResourceView* srv = nullptr; int w = 0, hgt = 0;
+            if (QrToTexture(g.qrEmv, &srv, &w, &hgt)) {
+                if (g_QrTex) g_QrTex->Release();
+                g_QrTex = srv; g_QrW = w; g_QrH = hgt;
+            } else LogLine("[..] Falha ao gerar QR — use copia-e-cola.");
+        }
         g.screen = SCR_PAY;
         SetStatus("Escaneie o QR ou copie o codigo", ST_GOLD);
-        // QR texture: base64 do servidor, fallback qrserver
-        std::thread([] {
-            std::string png;
-            size_t p = g.qrB64.find("base64,");
-            if (p != std::string::npos) png = B64Decode(g.qrB64.substr(p + 7));
-            if (png.empty()) {
-                std::string enc;
-                for (char c : g.qrEmv) {
-                    if (isalnum((unsigned char)c) || c == '-' || c == '_' || c == '.' || c == '~') enc += c;
-                    else { char b[4]; snprintf(b, 4, "%%%02X", (unsigned char)c); enc += b; }
-                }
-                auto rr = HttpDownload("https://api.qrserver.com/v1/create-qr-code/?size=260x260&data=" + enc);
-                if (rr.status == 200) png = rr.body;
-            }
-            if (!png.empty()) {
-                ID3D11ShaderResourceView* srv = nullptr; int w = 0, hgt = 0;
-                if (PngToTexture(png, &srv, &w, &hgt)) {
-                    if (g_QrTex) { g_QrTex->Release(); }
-                    g_QrTex = srv; g_QrW = w; g_QrH = hgt;
-                } else LogLine("[..] QR falhou — use copia-e-cola.");
-            } else LogLine("[..] QR falhou — use copia-e-cola.");
-        }).detach();
         // poll
         std::thread([] {
             for (int i = 0; i < 150 && g.screen == SCR_PAY && !g.paid; i++) {
