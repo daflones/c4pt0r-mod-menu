@@ -841,18 +841,18 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp) {
         }
 
         if (s == SCR_PAY) {
+            SetTextColor(hdc, CLR_DIM);
+            SelectObject(hdc, g_FontSm);
+            TextOutW(hdc, 52, 124, L"ESCANEIE COM O APP DO BANCO", 27);
             // painel branco atras do QR
-            RECT qr{ 103, 140, 357, 394 };
+            RECT qr{ 103, 148, 357, 394 };
             PaintCard(hdc, qr, RGB(245, 245, 245), CLR_BORDER);
             if (!g_QrBitmap) {
                 SetTextColor(hdc, CLR_DIM);
                 SelectObject(hdc, g_FontCard);
-                RECT t{ 103, 250, 357, 280 };
+                RECT t{ 103, 255, 357, 285 };
                 DrawTextW(hdc, L"Gerando QR...", -1, &t, DT_CENTER);
             }
-            SetTextColor(hdc, CLR_DIM);
-            SelectObject(hdc, g_FontSm);
-            TextOutW(hdc, 52, 140, L"ESCANEIE COM O APP DO BANCO", 27);
         }
         EndPaint(hWnd, &ps);
         return 0;
