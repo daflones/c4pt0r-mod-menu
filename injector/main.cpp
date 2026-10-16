@@ -81,9 +81,13 @@ enum Screen { SCR_LOGIN, SCR_SIGNUP, SCR_MAIN, SCR_PAY };
 enum StatKind { ST_NEUTRO, ST_OK, ST_ERR, ST_GOLD };
 
 struct Product {
-    std::string slug, name, desc;
+    std::string slug, name, desc, dllPath;
     int price_cents = 0, duration_days = 0;   // 0 = vitalicio
     std::vector<std::string> features;
+    bool isExe() const {
+        return dllPath.size() > 4 &&
+            dllPath.compare(dllPath.size() - 4, 4, ".exe") == 0;
+    }
 };
 struct LicInfo { bool active = false; std::string expires; };
 
@@ -249,7 +253,7 @@ static bool DoRefresh(const std::string& rt) {
 }
 
 static void FetchProducts() {
-    auto r = RestGet("/rest/v1/products?select=slug,name,description,price_cents,duration_days,features&active=eq.true&order=price_cents.asc");
+    auto r = RestGet("/rest/v1/products?select=slug,name,description,price_cents,duration_days,dll_path,features&active=eq.true&order=price_cents.asc");
     auto j = JsonParse(r.body);
     if (j.type != Json::Arr) return;
     std::vector<Product> out;
@@ -258,6 +262,7 @@ static void FetchProducts() {
         pr.slug = p["slug"].str();
         pr.name = p["name"].str();
         pr.desc = p["description"].str();
+        pr.dllPath = p["dll_path"].str();
         pr.price_cents = (int)p["price_cents"].n;
         pr.duration_days = (int)p["duration_days"].n;
         for (auto& f : p["features"].a) pr.features.push_back(f.str());
@@ -519,6 +524,44 @@ static void ThreadInject(std::string slug) {
     g.busy = false;
 }
 
+// produto tipo EXE (spoofer etc): baixa via licenca e executa
+static void ThreadRunExe(std::string slug, std::string fname) {
+    g.busy = true;
+    SetStatus("Verificando licenca...", ST_NEUTRO);
+    std::string url, err;
+    if (!CheckLicense(slug, true, &url, &err) || url.empty()) {
+        SetStatus(err.empty() ? "Sem licenca ativa para este produto." : err, ST_ERR);
+        g.busy = false; return;
+    }
+    SetStatus("Baixando aplicativo...", ST_NEUTRO);
+    auto r = HttpDownload(url);
+    if (r.status != 200 || r.body.size() < 10000) {
+        SetStatus("Download falhou.", ST_ERR);
+        g.busy = false; return;
+    }
+    wchar_t* app = nullptr;
+    SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &app);
+    std::wstring dir = app; CoTaskMemFree(app);
+    dir += L"\\C4pt0r\\products";
+    CreateDirectoryW((std::wstring(app) + L"\\C4pt0r").c_str(), nullptr);
+    CreateDirectoryW(dir.c_str(), nullptr);
+    std::wstring exePath = dir + L"\\" + ToWide(fname);
+    HANDLE f = CreateFileW(exePath.c_str(), GENERIC_WRITE, 0, nullptr,
+        CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    DWORD w = 0;
+    WriteFile(f, r.body.data(), (DWORD)r.body.size(), &w, nullptr);
+    CloseHandle(f);
+
+    HINSTANCE rc = ShellExecuteW(nullptr, L"open", exePath.c_str(), nullptr, nullptr, SW_SHOW);
+    if ((INT_PTR)rc > 32) {
+        SetStatus("Aplicativo iniciado.", ST_OK);
+        LogLine("[OK] " + fname + " executado.");
+    } else {
+        SetStatus("Falha ao abrir o aplicativo.", ST_ERR);
+    }
+    g.busy = false;
+}
+
 // ============================================================================
 //  ImGui style + widgets
 // ============================================================================
@@ -755,10 +798,19 @@ static void ProductCard(const Product& p, const LicInfo& lic, bool anyLicense) {
     ImGui::Dummy(ImVec2(0, 2));
 
     if (lic.active) {
-        if (PrimaryBtn(g.injected ? "INJETADO — APERTE F9" : "INJETAR NO FIVEM", -1, 40)) {
-            if (!g.busy && !g.injected) {
-                if (!FindFiveMPid()) SetStatus("Abra o FiveM e entre num servidor.", ST_ERR);
-                else std::thread(ThreadInject, p.slug).detach();
+        if (p.isExe()) {
+            if (PrimaryBtn("BAIXAR E ABRIR", -1, 40)) {
+                if (!g.busy) {
+                    std::string fn = p.dllPath.substr(p.dllPath.find_last_of('/') + 1);
+                    std::thread(ThreadRunExe, p.slug, fn).detach();
+                }
+            }
+        } else {
+            if (PrimaryBtn(g.injected ? "INJETADO — APERTE F9" : "INJETAR NO FIVEM", -1, 40)) {
+                if (!g.busy && !g.injected) {
+                    if (!FindFiveMPid()) SetStatus("Abra o FiveM e entre num servidor.", ST_ERR);
+                    else std::thread(ThreadInject, p.slug).detach();
+                }
             }
         }
     } else {
