@@ -65,7 +65,36 @@ namespace C4pt0r::Memory
         uintptr_t base = GetModuleBase(moduleName);
         size_t    size = GetModuleSize(moduleName);
         if (!base || !size) return 0;
-        return PatternScan(base, size, pattern);
+
+        // Walk committed+readable pages only — a raw scan over SizeOfImage
+        // crosses guard/noaccess regions and AVs mid-scan
+        uintptr_t addr = base;
+        const uintptr_t end = base + size;
+        while (addr < end) {
+            MEMORY_BASIC_INFORMATION mbi{};
+            if (!VirtualQuery(reinterpret_cast<void*>(addr), &mbi, sizeof(mbi)) ||
+                !mbi.RegionSize) break;
+
+            uintptr_t regionEnd = reinterpret_cast<uintptr_t>(mbi.BaseAddress) + mbi.RegionSize;
+            if (mbi.State == MEM_COMMIT &&
+                !(mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD))) {
+                uintptr_t scanEnd = regionEnd > end ? end : regionEnd;
+                uintptr_t hit = PatternScan(addr, scanEnd - addr, pattern);
+                if (hit) return hit;
+            }
+            addr = regionEnd;
+        }
+        return 0;
+    }
+
+    // ---- Executable check — validate a resolved pointer before calling it -
+    inline bool IsExecutable(uintptr_t addr) {
+        if (!addr) return false;
+        MEMORY_BASIC_INFORMATION mbi{};
+        if (!VirtualQuery(reinterpret_cast<void*>(addr), &mbi, sizeof(mbi))) return false;
+        constexpr DWORD execMask = PAGE_EXECUTE | PAGE_EXECUTE_READ |
+                                   PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY;
+        return mbi.State == MEM_COMMIT && (mbi.Protect & execMask) != 0;
     }
 
     // ---- RIP-relative address resolution --------------------------------

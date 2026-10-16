@@ -11,6 +11,7 @@
 #include <Windows.h>
 #include <TlHelp32.h>
 #include <dwmapi.h>
+#include <commdlg.h>
 #include <string>
 #include <vector>
 #include <filesystem>
@@ -246,8 +247,8 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPara
         g_EditBrush  = CreateSolidBrush(CLR_EDIT_BG);
 
         int y = 70;
-        int pad = 16;
-        int w = 420;
+        int pad = 20;
+        int w = 545;
 
         // DLL path edit
         CreateWindowW(L"STATIC", L"DLL Path:", WS_CHILD | WS_VISIBLE,
@@ -278,7 +279,7 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPara
         // Log area
         g_hLog = CreateWindowExW(0, L"STATIC", L"",
             WS_CHILD | WS_VISIBLE | SS_LEFT,
-            pad, y, w, 120, hWnd, (HMENU)ID_STATIC_LOG, nullptr, nullptr);
+            pad, y, w, 220, hWnd, (HMENU)ID_STATIC_LOG, nullptr, nullptr);
 
         // Set fonts
         SendMessageW(g_hDllPath,   WM_SETFONT, (WPARAM)g_Font, TRUE);
@@ -465,7 +466,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, LPWSTR, int nCmdShow) {
     wc.hbrBackground = nullptr;  // we paint our own bg
     RegisterClassExW(&wc);
 
-    int winW = 470, winH = 430;
+    int winW = 600, winH = 580;
     int screenW = GetSystemMetrics(SM_CXSCREEN);
     int screenH = GetSystemMetrics(SM_CYSCREEN);
 

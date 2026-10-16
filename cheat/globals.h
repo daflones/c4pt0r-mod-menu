@@ -76,6 +76,7 @@ namespace C4pt0r
         bool  godmode         = false;
         bool  invisible       = false;
         bool  noRecoil        = false;
+        bool  infiniteAmmo    = false;
         bool  speedHack       = false;
         float speedMultiplier = 1.5f;
         bool  noclip          = false;

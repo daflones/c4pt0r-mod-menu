@@ -15,6 +15,8 @@ $PROJECT_DIR    = $PSScriptRoot
 $BUILD_DIR      = Join-Path $PROJECT_DIR "build"
 $CHEAT_DIR      = Join-Path $PROJECT_DIR "cheat"
 $IMGUI_DEST     = Join-Path $CHEAT_DIR "deps\imgui"
+$MINHOOK_URL    = "https://github.com/TsudaKageyu/minhook/archive/refs/heads/master.zip"
+$MINHOOK_DEST   = Join-Path $CHEAT_DIR "deps\minhook"
 
 # ---- Colors / Banner ----------------------------------------------------
 function Write-C4 { param([string]$Text, [string]$Color = "Cyan")
@@ -276,9 +278,62 @@ if (Test-Path $imguiCheck) {
 }
 
 # ===========================================================================
-#  STEP 5: Build
+#  STEP 5: Download MinHook
 # ===========================================================================
-Write-Step 5 "Compilando projeto..."
+Write-Step 5 "Verificando MinHook..."
+
+$minhookCheck = Join-Path $MINHOOK_DEST "include\MinHook.h"
+if (Test-Path $minhookCheck) {
+    Write-Ok "MinHook ja presente em deps/minhook/"
+} else {
+    Write-Info "Baixando MinHook..."
+
+    $tempZip = Join-Path $env:TEMP "minhook-download.zip"
+    $tempExtract = Join-Path $env:TEMP "minhook-extract"
+
+    Invoke-WebRequest -Uri $MINHOOK_URL -OutFile $tempZip
+    Write-Ok "Download completo"
+
+    if (Test-Path $tempExtract) { Remove-Item $tempExtract -Recurse -Force }
+    Expand-Archive -Path $tempZip -DestinationPath $tempExtract -Force
+
+    $extractedDir = Get-ChildItem $tempExtract -Directory | Select-Object -First 1
+
+    # Create destination structure
+    $mhIncDir = Join-Path $MINHOOK_DEST "include"
+    $mhSrcDir = Join-Path $MINHOOK_DEST "src"
+    $mhHdeDir = Join-Path $MINHOOK_DEST "src\hde"
+    New-Item -ItemType Directory -Path $mhIncDir -Force | Out-Null
+    New-Item -ItemType Directory -Path $mhSrcDir -Force | Out-Null
+    New-Item -ItemType Directory -Path $mhHdeDir -Force | Out-Null
+
+    # Copy include
+    Copy-Item (Join-Path $extractedDir.FullName "include\MinHook.h") -Destination $mhIncDir -Force
+
+    # Copy src
+    $srcFiles = @("hook.c", "buffer.c", "buffer.h", "trampoline.c", "trampoline.h")
+    foreach ($f in $srcFiles) {
+        $src = Join-Path $extractedDir.FullName "src\$f"
+        if (Test-Path $src) { Copy-Item $src -Destination $mhSrcDir -Force }
+    }
+
+    # Copy hde
+    $hdeFiles = @("hde32.c", "hde32.h", "hde64.c", "hde64.h", "table32.h", "table64.h", "pstdint.h")
+    foreach ($f in $hdeFiles) {
+        $src = Join-Path $extractedDir.FullName "src\hde\$f"
+        if (Test-Path $src) { Copy-Item $src -Destination $mhHdeDir -Force }
+    }
+
+    Remove-Item $tempZip -ErrorAction SilentlyContinue
+    Remove-Item $tempExtract -Recurse -ErrorAction SilentlyContinue
+
+    Write-Ok "MinHook instalado em cheat/deps/minhook/"
+}
+
+# ===========================================================================
+#  STEP 6: Build
+# ===========================================================================
+Write-Step 6 "Compilando projeto..."
 
 $slnPath = Join-Path $PROJECT_DIR "C4pt0r-Cheats.sln"
 
@@ -295,12 +350,19 @@ if (-not (Test-Path $BUILD_DIR)) {
 }
 
 # ---- Auto-detect PlatformToolset ----
-$toolset = "v143"  # default
-$vcToolsDir = Join-Path $vsPath "MSBuild\Microsoft\VC"
-if (Test-Path $vcToolsDir) {
-    $toolsetDirs = Get-ChildItem $vcToolsDir -Directory | Where-Object { $_.Name -match '^v\d+' }
-    if ($toolsetDirs) {
-        $toolset = ($toolsetDirs | Select-Object -Last 1).Name
+$toolset = "v143"  # default fallback
+# The real toolset name lives under: MSBuild\Microsoft\VC\<ver>\Platforms\x64\PlatformToolsets\
+$vcTargetsDir = Join-Path $vsPath "MSBuild\Microsoft\VC"
+if (Test-Path $vcTargetsDir) {
+    $vcVerDirs = Get-ChildItem $vcTargetsDir -Directory | Where-Object { $_.Name -match '^v\d+' }
+    foreach ($vcVer in $vcVerDirs) {
+        $toolsetPath = Join-Path $vcVer.FullName "Platforms\x64\PlatformToolsets"
+        if (Test-Path $toolsetPath) {
+            $installedToolsets = Get-ChildItem $toolsetPath -Directory | Where-Object { $_.Name -match '^v\d+' }
+            if ($installedToolsets) {
+                $toolset = ($installedToolsets | Select-Object -Last 1).Name
+            }
+        }
     }
 }
 Write-Info "Toolset detectado: $toolset"
@@ -360,9 +422,9 @@ if ($buildExit -eq 0) {
 }
 
 # ===========================================================================
-#  STEP 6: Verify output
+#  STEP 7: Verify output
 # ===========================================================================
-Write-Step 6 "Verificando binarios..."
+Write-Step 7 "Verificando binarios..."
 
 $injectorExe = Join-Path $BUILD_DIR "C4pt0r-Injector.exe"
 $cheatDll    = Join-Path $BUILD_DIR "C4pt0r-Cheat.dll"

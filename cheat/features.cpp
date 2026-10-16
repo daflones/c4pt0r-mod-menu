@@ -4,6 +4,13 @@
 // ============================================================================
 
 #include "features.h"
+#include "logger.h"
+
+// Prevent Windows min/max macros from breaking std::max/std::clamp
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+
 #include "globals.h"
 #include "natives.h"
 #include "imgui.h"
@@ -73,13 +80,25 @@ namespace C4pt0r::Features
         s_WasShooting = shooting;
     }
 
+    // ---- Infinite Ammo ---------------------------------------------------
+    static void TickInfiniteAmmo()
+    {
+        if (!g_Player.infiniteAmmo) return;
+        int ped = Natives::PlayerPedId();
+        if (!ped) return;
+        Natives::SetPedInfiniteAmmoClip(ped, true);
+    }
+
     // ---- Noclip ---------------------------------------------------------
+    static bool s_WasNoclip = false;
+
     static void TickNoclip()
     {
         int ped = Natives::PlayerPedId();
         if (!ped) return;
 
         if (g_Player.noclip) {
+            s_WasNoclip = true;
             Natives::FreezeEntityPosition(ped, true);
             Natives::SetEntityCollision(ped, false, false);
             Natives::SetEntityHasGravity(ped, false);
@@ -125,16 +144,12 @@ namespace C4pt0r::Features
             }
 
             Natives::SetEntityCoordsNoOffset(ped, pos.x, pos.y, pos.z);
-        } else {
+        } else if (s_WasNoclip) {
             // Restore physics when noclip is turned off
-            static bool wasNoclip = false;
-            if (wasNoclip) {
-                Natives::FreezeEntityPosition(ped, false);
-                Natives::SetEntityCollision(ped, true, true);
-                Natives::SetEntityHasGravity(ped, true);
-                wasNoclip = false;
-            }
-            if (g_Player.noclip) wasNoclip = true;
+            Natives::FreezeEntityPosition(ped, false);
+            Natives::SetEntityCollision(ped, true, true);
+            Natives::SetEntityHasGravity(ped, true);
+            s_WasNoclip = false;
         }
     }
 
@@ -307,7 +322,7 @@ namespace C4pt0r::Features
             while (dYaw < -180.0f) dYaw += 360.0f;
 
             // Smooth
-            float smooth = std::max(g_Aimbot.smooth, 1.0f);
+            float smooth = (g_Aimbot.smooth > 1.0f) ? g_Aimbot.smooth : 1.0f;
             float newHeading = currentHeading + (dYaw / smooth);
             float newPitch   = currentPitch   + (dPitch / smooth);
 
@@ -321,10 +336,21 @@ namespace C4pt0r::Features
     {
         if (!Natives::IsReady()) return;
 
+        static bool s_FirstTick = true;
+        if (s_FirstTick) {
+            s_FirstTick = false;
+            int ped  = Natives::PlayerPedId();
+            int pid  = Natives::PlayerId();
+            Vec3 pos = ped ? Natives::GetEntityCoords(ped) : Vec3{};
+            Log::Write("FirstTick: ped=%d player=%d pos=(%.1f, %.1f, %.1f)",
+                       ped, pid, pos.x, pos.y, pos.z);
+        }
+
         TickGodmode();
         TickInvisible();
         TickSpeed();
         TickNoRecoil();
+        TickInfiniteAmmo();
         TickNoclip();
         TickTeleport();
         TickESPData();

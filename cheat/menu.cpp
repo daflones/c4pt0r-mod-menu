@@ -137,6 +137,10 @@ namespace C4pt0r::Menu
         SectionHeader("NO RECOIL");
         ImGui::Checkbox("Ativar No Recoil", &g_Player.noRecoil);
         Tooltip("Cancela o recuo da arma salvando/restaurando o pitch da camera.");
+
+        SectionHeader("ARMA");
+        ImGui::Checkbox("Municao infinita", &g_Player.infiniteAmmo);
+        Tooltip("O pente nunca esvazia — nao precisa recarregar.");
     }
 
     static void TabVisuals()
@@ -193,7 +197,7 @@ namespace C4pt0r::Menu
         if (ImGui::Button("TP para Waypoint", ImVec2(-1, 32))) {
             g_Teleport.toWaypoint = true;
         }
-        Tooltip("Marca no mapa → teleporta pra la.");
+        Tooltip("Marca no mapa e teleporta pra la.");
 
         ImGui::Spacing();
 

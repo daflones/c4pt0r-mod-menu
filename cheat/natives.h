@@ -52,36 +52,61 @@ namespace C4pt0r::Natives
 
     // ---- Handler types --------------------------------------------------
     using NativeHandler       = void(__cdecl*)(NativeCallContext*);
-    using GetNativeHandlerFn  = NativeHandler(*)(uint64_t nativeHash);
+    // rage::scrEngine::GetNativeHandler(registrationTable*, hash)
+    // verified on FiveM b3258: resolver takes the table as arg1 — the table
+    // is a static 256-entry bucket array, not retrievable from the hash alone
+    using GetNativeHandlerFn  = NativeHandler(*)(uintptr_t registrationTable, uint64_t nativeHash);
 
     // ---- Core API -------------------------------------------------------
     bool           Initialize();
     bool           IsReady();
     NativeHandler  GetHandler(uint64_t hash);
+    void           LogMissingHash(uint64_t hash);   // reports each dead hash once
+
+    // Unified call: tries scripting-gta CallNativeHandler first, then
+    // rage::scrEngine::GetNativeHandler, then the raw table walk.
+    // args = qword-packed arguments (each arg in its own slot), ret = 4-qword
+    // result buffer. Returns false when no invocation path succeeded.
+    bool           CallNative(uint64_t hash, const uint64_t* args, int nargs,
+                              uint64_t* ret);
 
     // ---- Typed invoke ---------------------------------------------------
+    namespace detail {
+        inline void PackArgs(uint64_t* dst) { (void)dst; }
+        template <typename T, typename... Rest>
+        inline void PackArgs(uint64_t* dst, T value, Rest... rest) {
+            static_assert(sizeof(T) <= 8);
+            *reinterpret_cast<T*>(dst) = value;
+            PackArgs(dst + 1, rest...);
+        }
+    }
+
     template <typename R, typename... Args>
     inline R Invoke(uint64_t hash, Args... args) {
-        auto handler = GetHandler(hash);
-        if (!handler) return R{};
-        NativeCallContext ctx;
-        (ctx.Push(args), ...);
-        handler(&ctx);
-        return ctx.GetResult<R>();
+        uint64_t packed[sizeof...(Args) > 0 ? sizeof...(Args) : 1] = {};
+        detail::PackArgs(packed, args...);
+        uint64_t ret[4] = {};
+        if (!CallNative(hash, packed, static_cast<int>(sizeof...(Args)), ret)) {
+            LogMissingHash(hash);
+            return R{};
+        }
+        return *reinterpret_cast<R*>(ret);
     }
 
     // void specialization
     template <typename... Args>
     inline void InvokeVoid(uint64_t hash, Args... args) {
-        auto handler = GetHandler(hash);
-        if (!handler) return;
-        NativeCallContext ctx;
-        (ctx.Push(args), ...);
-        handler(&ctx);
+        uint64_t packed[sizeof...(Args) > 0 ? sizeof...(Args) : 1] = {};
+        detail::PackArgs(packed, args...);
+        if (!CallNative(hash, packed, static_cast<int>(sizeof...(Args)), nullptr))
+            LogMissingHash(hash);
     }
 
     // Vec3-returning natives (special handling)
-    Vec3 InvokeVec3(uint64_t hash, uint64_t arg0 = 0, uint64_t arg1 = 0);
+    // explicitN < 0 = legacy behavior (skip zero args); otherwise push
+    // exactly explicitN args — needed when a legit arg can be 0/false.
+    Vec3 InvokeVec3(uint64_t hash, uint64_t arg0 = 0, uint64_t arg1 = 0,
+                    int explicitN = -1);
 
     // ---- Common native hashes -------------------------------------------
     namespace Hash
@@ -184,6 +209,7 @@ namespace C4pt0r::Natives
     void         SetGameplayCamRelativeHeading(float h);
     void         SetGameplayCamRelativePitch(float p, float smoothSpeed = 1.0f);
     void         SetRunSprintMultiplier(int player, float mult);
+    void         SetPedInfiniteAmmoClip(int ped, bool toggle);
     void         FreezeEntityPosition(int entity, bool toggle);
     void         SetEntityCollision(int entity, bool toggle, bool keepPhysics = true);
     void         SetEntityHasGravity(int entity, bool toggle);

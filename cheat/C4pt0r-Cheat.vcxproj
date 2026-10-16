@@ -45,7 +45,7 @@
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
       <LanguageStandard>stdcpp17</LanguageStandard>
-      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)deps\imgui;$(ProjectDir)deps\imgui\backends;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(ProjectDir)deps\imgui;$(ProjectDir)deps\imgui\backends;$(ProjectDir)deps\minhook\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>WIN32_LEAN_AND_MEAN;NDEBUG;_CRT_SECURE_NO_WARNINGS;_WINDLL;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <Optimization>MaxSpeed</Optimization>
       <FunctionLevelLinking>true</FunctionLevelLinking>
@@ -83,6 +83,23 @@
     <!-- Dear ImGui backends -->
     <ClCompile Include="deps\imgui\backends\imgui_impl_dx11.cpp" />
     <ClCompile Include="deps\imgui\backends\imgui_impl_win32.cpp" />
+
+    <!-- MinHook (compiled as C) -->
+    <ClCompile Include="deps\minhook\src\hook.c">
+      <CompileAs>CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Include="deps\minhook\src\buffer.c">
+      <CompileAs>CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Include="deps\minhook\src\trampoline.c">
+      <CompileAs>CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Include="deps\minhook\src\hde\hde32.c">
+      <CompileAs>CompileAsC</CompileAs>
+    </ClCompile>
+    <ClCompile Include="deps\minhook\src\hde\hde64.c">
+      <CompileAs>CompileAsC</CompileAs>
+    </ClCompile>
   </ItemGroup>
 
   <!-- ==================== Header Files ==================== -->
@@ -93,6 +110,10 @@
     <ClInclude Include="hooks.h" />
     <ClInclude Include="menu.h" />
     <ClInclude Include="features.h" />
+    <ClInclude Include="logger.h" />
+
+    <!-- MinHook -->
+    <ClInclude Include="deps\minhook\include\MinHook.h" />
 
     <!-- ImGui headers -->
     <ClInclude Include="deps\imgui\imgui.h" />
