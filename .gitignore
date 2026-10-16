@@ -1,0 +1,43 @@
+# ============================================================================
+#  C4pt0r Cheats — .gitignore
+# ============================================================================
+
+# Build output
+build/
+*.exe
+*.dll
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.obj
+
+# VS intermediate
+obj/
+x64/
+Debug/
+Release/
+*.log
+*.tlog
+
+# VS user files
+*.user
+*.suo
+*.ncb
+*.sdf
+*.opensdf
+*.VC.db
+*.VC.opendb
+.vs/
+
+# ImGui (downloaded by setup.ps1)
+cheat/deps/
+
+# OS files
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Temp
+*.tmp
+*.bak
