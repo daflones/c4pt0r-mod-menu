@@ -32,13 +32,15 @@ function Write-Step  { param([int]$N, [string]$T)
 }
 
 Write-Host ""
-Write-C4 "   ██████╗██╗  ██╗██████╗ ████████╗ ██████╗ ██████╗ "
-Write-C4 "  ██╔════╝██║  ██║██╔══██╗╚══██╔══╝██╔═══██╗██╔══██╗"
-Write-C4 "  ██║     ███████║██████╔╝   ██║   ██║   ██║██████╔╝"
-Write-C4 "  ██║     ╚════██║██╔═══╝    ██║   ██║   ██║██╔══██╗"
-Write-C4 "  ╚██████╗     ██║██║        ██║   ╚██████╔╝██║  ██║"
-Write-C4 "   ╚═════╝     ╚═╝╚═╝        ╚═╝    ╚═════╝ ╚═╝  ╚═╝"
-Write-C4 "              C H E A T S  —  S E T U P" "White"
+Write-C4 "    _____ _  _         _              "
+Write-C4 "   / ____| || |       | |             "
+Write-C4 "  | |   | || |_ _ __ | |_ ___  _ __   "
+Write-C4 "  | |   |__   _| '_ \| __/ _ \| '__|  "
+Write-C4 "  | |____  | | | |_) | || (_) | |     "
+Write-C4 "   \_____| |_| | .__/ \__\___/|_|     "
+Write-C4 "                | |                     "
+Write-C4 "                |_|                     "
+Write-C4 "          C H E A T S  -  S E T U P" "White"
 Write-Host ""
 
 # ---- Check admin ---------------------------------------------------------
@@ -292,22 +294,53 @@ if (-not (Test-Path $BUILD_DIR)) {
     New-Item -ItemType Directory -Path $BUILD_DIR -Force | Out-Null
 }
 
+# ---- Auto-detect PlatformToolset ----
+$toolset = "v143"  # default
+$vcToolsDir = Join-Path $vsPath "MSBuild\Microsoft\VC"
+if (Test-Path $vcToolsDir) {
+    $toolsetDirs = Get-ChildItem $vcToolsDir -Directory | Where-Object { $_.Name -match '^v\d+' }
+    if ($toolsetDirs) {
+        $toolset = ($toolsetDirs | Select-Object -Last 1).Name
+    }
+}
+Write-Info "Toolset detectado: $toolset"
+
+# ---- Detect Windows SDK version ----
+$sdkVersion = ""
+$sdkRoot = "${env:ProgramFiles(x86)}\Windows Kits\10\Include"
+if (Test-Path $sdkRoot) {
+    $sdkDirs = Get-ChildItem $sdkRoot -Directory | Where-Object { $_.Name -match '^\d+\.\d+\.\d+\.\d+$' } | Sort-Object Name
+    if ($sdkDirs) {
+        $sdkVersion = ($sdkDirs | Select-Object -Last 1).Name
+        Write-Info "Windows SDK detectado: $sdkVersion"
+    }
+}
+
 Write-Info "MSBuild: $msbuildPath"
 Write-Info "Solution: $slnPath"
 Write-Info "Compilando Release|x64..."
 Write-Host ""
 
 # Build
-$buildArgs = @(
+$buildCmd = @(
     "`"$slnPath`"",
     "/p:Configuration=Release",
     "/p:Platform=x64",
-    "/m",           # parallel build
-    "/v:minimal",   # minimal verbosity
+    "/p:PlatformToolset=$toolset",
+    "/m",
+    "/v:minimal",
     "/nologo"
 )
+$sdkArg = ""
+if ($sdkVersion -ne "") {
+    $sdkArg = "/p:WindowsTargetPlatformVersion=$sdkVersion"
+}
 
-$buildResult = & $msbuildPath $slnPath /p:Configuration=Release /p:Platform=x64 /m /v:minimal /nologo 2>&1
+if ($sdkArg -ne "") {
+    $buildResult = & $msbuildPath $slnPath /p:Configuration=Release /p:Platform=x64 "/p:PlatformToolset=$toolset" $sdkArg /m /v:minimal /nologo 2>&1
+} else {
+    $buildResult = & $msbuildPath $slnPath /p:Configuration=Release /p:Platform=x64 "/p:PlatformToolset=$toolset" /m /v:minimal /nologo 2>&1
+}
 $buildExit = $LASTEXITCODE
 
 Write-Host ""
@@ -320,8 +353,8 @@ if ($buildExit -eq 0) {
     Write-Host ($buildResult | Out-String) -ForegroundColor DarkGray
     Write-Host ""
     Write-Warn "Erros comuns:"
-    Write-Warn "  - Windows SDK nao encontrado → reinstale Build Tools"
-    Write-Warn "  - ImGui headers nao encontrados → rode setup.bat de novo"
+    Write-Warn "  - Windows SDK nao encontrado -> reinstale Build Tools"
+    Write-Warn "  - ImGui headers nao encontrados -> rode setup.bat de novo"
     Read-Host "Enter para sair"
     exit 1
 }
