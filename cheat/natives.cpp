@@ -9,6 +9,7 @@
 #include "logger.h"
 #include <cstdio>
 #include <set>
+#include <chrono>
 
 namespace C4pt0r::Natives
 {
@@ -59,38 +60,71 @@ namespace C4pt0r::Natives
         }
     };
 
+    // ---- Per-path health tracking -----------------------------------------
+    //  If one invocation path starts throwing C++ exceptions every call
+    //  (session transition, module reload), it gets retired and the next
+    //  path takes over instead of the whole feature set dying silently.
+    static int s_FailA = 0, s_FailB = 0, s_FailC = 0;
+    static constexpr int PATH_FAIL_LIMIT = 30;
+
+    static bool TryExports();  // fwd — full impl below
+
+    // Self-heal: when every path has been retired, re-resolve the exports
+    // periodically. Modules that got (un)loaded become reachable again.
+    static void MaybeReResolve() {
+        if (s_CallNative || s_RageGNH || s_GetNativeHandler) return;
+        static auto last = std::chrono::steady_clock::time_point{};
+        auto now = std::chrono::steady_clock::now();
+        if (now - last < std::chrono::seconds(5)) return;
+        last = now;
+        Log::Write("All native paths dead — re-resolving exports...");
+        TryExports();
+    }
+
     // ---- Unified native call ---------------------------------------------
     //  Fills ret[0..3] (float-packed for Vec3), returns false on failure.
     bool CallNative(uint64_t hash, const uint64_t* args, int nargs,
                     uint64_t* ret)
     {
-        // FiveM converts handler faults into C++ exceptions — contain them
-        // here so a single bad call can't propagate up and kill the feature
-        // loop or the whole init.
-        try {
-            // Path A: FiveM's exported high-level invoke (does everything)
-            if (s_CallNative) {
+        MaybeReResolve();
+
+        // Path A: FiveM's exported high-level invoke (does everything)
+        if (s_CallNative) {
+            try {
                 FxScriptContext ctx;
                 ctx.Reset();
                 for (int i = 0; i < nargs; ++i) ctx.args[i] = args[i];
                 ctx.numArgs = nargs;
                 bool ok = s_CallNative(hash, &ctx);
-                if (ret) {
-                    ret[0] = ctx.rets[0];
-                    ret[1] = ctx.rets[1];
-                    ret[2] = ctx.rets[2];
-                    ret[3] = ctx.rets[3];
+                if (ok) {
+                    s_FailA = 0;
+                    if (ret) {
+                        ret[0] = ctx.rets[0];
+                        ret[1] = ctx.rets[1];
+                        ret[2] = ctx.rets[2];
+                        ret[3] = ctx.rets[3];
+                    }
+                    return true;
                 }
-                return ok;
+                // returned false = native blocked/missing — fall through
+                // to the raw paths, they may still resolve it
+            } catch (...) {
+                if (++s_FailA == PATH_FAIL_LIMIT) {
+                    s_CallNative = nullptr;
+                    Log::Write("CallNativeHandler path died (%d throws) — dropping to rage path.", s_FailA);
+                }
             }
+        }
 
-            // Path B: exported scrEngine::GetNativeHandler -> call raw handler
-            if (s_RageGNH) {
+        // Path B: exported scrEngine::GetNativeHandler -> call raw handler
+        if (s_RageGNH) {
+            try {
                 NativeHandler h = s_RageGNH(hash);
                 if (h && Memory::IsExecutable(reinterpret_cast<uintptr_t>(h))) {
                     NativeCallContext ctx;
                     for (int i = 0; i < nargs; ++i) ctx.Push(args[i]);
                     h(&ctx);
+                    s_FailB = 0;
                     if (ret) {
                         const uint64_t* rv = ctx.returnValue;
                         ret[0] = rv[0]; ret[1] = rv[1];
@@ -98,17 +132,25 @@ namespace C4pt0r::Natives
                     }
                     return true;
                 }
+            } catch (...) {
+                if (++s_FailB == PATH_FAIL_LIMIT) {
+                    s_RageGNH = nullptr;
+                    Log::Write("rage GetNativeHandler path died (%d throws) — dropping to raw table.", s_FailB);
+                }
             }
+        }
 
-            // Path C: raw table walk (mapped hash, raw handler — likely
-            // adhesive-encrypted on this build; still try as last resort)
-            if (s_GetNativeHandler && s_NativeTable) {
+        // Path C: raw table walk (mapped hash, raw handler — likely
+        // adhesive-encrypted on this build; still try as last resort)
+        if (s_GetNativeHandler && s_NativeTable) {
+            try {
                 uint64_t h2 = s_MapNative ? s_MapNative(hash) : hash;
                 NativeHandler h = s_GetNativeHandler(s_NativeTable, h2);
                 if (h && Memory::IsExecutable(reinterpret_cast<uintptr_t>(h))) {
                     NativeCallContext ctx;
                     for (int i = 0; i < nargs; ++i) ctx.Push(args[i]);
                     h(&ctx);
+                    s_FailC = 0;
                     if (ret) {
                         const uint64_t* rv = ctx.returnValue;
                         ret[0] = rv[0]; ret[1] = rv[1];
@@ -116,13 +158,14 @@ namespace C4pt0r::Natives
                     }
                     return true;
                 }
+            } catch (...) {
+                if (++s_FailC == PATH_FAIL_LIMIT) {
+                    s_GetNativeHandler = nullptr;
+                    Log::Write("Raw table path died (%d throws) — no native paths left.", s_FailC);
+                }
             }
-        } catch (...) {
-            static std::set<uint64_t> s_Threw;
-            if (s_Threw.insert(hash).second)
-                Log::Write("Native 0x%016llX threw — skipping it from now on.",
-                           static_cast<unsigned long long>(hash));
         }
+
         return false;
     }
 
@@ -251,6 +294,8 @@ namespace C4pt0r::Natives
     }
 
     bool IsReady() { return s_Ready; }
+
+    bool ReInitialize() { return Initialize(); }
 
     // Kept for API compat — direct handler fetch via rage export when present
     NativeHandler GetHandler(uint64_t hash) {
@@ -583,5 +628,72 @@ namespace C4pt0r::Natives
         if (!CallNative(Hash::GET_BLIP_INFO_ID_COORD, a3, 1, ret3)) return {};
         auto* r = reinterpret_cast<float*>(ret3);
         return Vec3(r[0], r[1], r[2]);
+    }
+
+    Vec3 GetWaypointCoordsDirect() {
+        uint64_t ret[4] = {};
+        if (!CallNative(Hash::GET_WAYPOINT_COORDS, nullptr, 0, ret)) return {};
+        auto* r = reinterpret_cast<float*>(ret);
+        return Vec3(r[0], r[1], r[2]);
+    }
+
+    // ---- Ground -------------------------------------------------------------
+    bool GetGroundZ(float x, float y, float z, float& outZ) {
+        outZ = 0.f;
+        uint64_t a[5];
+        *reinterpret_cast<float*>(&a[0]) = x;
+        *reinterpret_cast<float*>(&a[1]) = y;
+        *reinterpret_cast<float*>(&a[2]) = z;
+        a[3] = reinterpret_cast<uint64_t>(&outZ);
+        a[4] = 1;   // ignoreWater-ish flag (harmless on builds that ignore it)
+        uint64_t ret[4] = {};
+        if (!CallNative(Hash::GET_GROUND_Z_FOR_3D_COORD, a, 5, ret)) return false;
+        return ret[0] != 0;
+    }
+
+    // ---- Vehicles -------------------------------------------------------------
+    uint32_t GetHashKey(const char* str) {
+        uint64_t a[] = { reinterpret_cast<uint64_t>(str) };
+        uint64_t ret[4] = {};
+        CallNative(Hash::GET_HASH_KEY, a, 1, ret);
+        return static_cast<uint32_t>(ret[0]);
+    }
+    void RequestModel(uint32_t model) {
+        uint64_t a[] = { static_cast<uint64_t>(model) };
+        CallNative(Hash::REQUEST_MODEL, a, 1, nullptr);
+    }
+    bool HasModelLoaded(uint32_t model) {
+        uint64_t a[] = { static_cast<uint64_t>(model) };
+        uint64_t ret[4] = {};
+        CallNative(Hash::HAS_MODEL_LOADED, a, 1, ret);
+        return ret[0] != 0;
+    }
+    void SetModelNoLongerNeeded(uint32_t model) {
+        uint64_t a[] = { static_cast<uint64_t>(model) };
+        CallNative(Hash::SET_MODEL_AS_NO_LONGER_NEEDED, a, 1, nullptr);
+    }
+    int CreateVehicle(uint32_t model, float x, float y, float z, float heading) {
+        uint64_t a[7];
+        a[0] = model;
+        *reinterpret_cast<float*>(&a[1]) = x;
+        *reinterpret_cast<float*>(&a[2]) = y;
+        *reinterpret_cast<float*>(&a[3]) = z;
+        *reinterpret_cast<float*>(&a[4]) = heading;
+        a[5] = 1;   // isNetwork
+        a[6] = 0;   // script-host check off
+        uint64_t ret[4] = {};
+        CallNative(Hash::CREATE_VEHICLE, a, 7, ret);
+        return static_cast<int>(ret[0]);
+    }
+    void SetPedIntoVehicle(int ped, int vehicle, int seat) {
+        uint64_t a[3];
+        *reinterpret_cast<int*>(&a[0]) = ped;
+        *reinterpret_cast<int*>(&a[1]) = vehicle;
+        *reinterpret_cast<int*>(&a[2]) = seat;
+        CallNative(Hash::SET_PED_INTO_VEHICLE, a, 3, nullptr);
+    }
+    void SetVehicleOnGroundProperly(int vehicle) {
+        uint64_t a[] = { static_cast<uint64_t>(vehicle) };
+        CallNative(Hash::SET_VEHICLE_ON_GROUND_PROPERLY, a, 1, nullptr);
     }
 }

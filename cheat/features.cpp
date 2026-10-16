@@ -143,6 +143,19 @@ namespace C4pt0r::Features
     }
 
     // ---- Teleport -------------------------------------------------------
+    // Pending waypoint state: TP requires a ground-Z probe which is async —
+    // we retry a few ticks before giving up and using raw waypoint Z.
+    static Vec3 s_PendingTp{};
+    static bool s_HasPendingTp = false;
+    static int  s_GroundTries  = 0;
+
+    static void DoTeleport(int ped, float x, float y, float z) {
+        // tp the vehicle too if we're inside one — otherwise we get ejected
+        int veh = Natives::IsPedInAnyVehicle(ped) ? Natives::GetVehiclePedIsIn(ped) : 0;
+        if (veh) Natives::SetEntityCoordsNoOffset(veh, x, y, z + 0.5f);
+        else     Natives::SetEntityCoordsNoOffset(ped, x, y, z + 0.5f);
+    }
+
     static void TickTeleport()
     {
         int ped = Natives::PlayerPedId();
@@ -158,13 +171,32 @@ namespace C4pt0r::Features
             g_Teleport.savedZ = pos.z;
         }
 
-        // TP to waypoint
+        // --- pending waypoint TP: keep probing ground Z a few ticks ---
+        if (s_HasPendingTp) {
+            float gz = 0;
+            if (Natives::GetGroundZ(s_PendingTp.x, s_PendingTp.y, s_PendingTp.z + 300.f, gz)) {
+                DoTeleport(ped, s_PendingTp.x, s_PendingTp.y, gz);
+                s_HasPendingTp = false;
+            } else if (++s_GroundTries > 12) {
+                // ground never resolved — land on the raw coords anyway
+                DoTeleport(ped, s_PendingTp.x, s_PendingTp.y, s_PendingTp.z + 1.f);
+                s_HasPendingTp = false;
+                Log::Write("TP waypoint: ground Z nao resolveu, usando Z bruto.");
+            }
+        }
+
+        // TP to waypoint — GET_WAYPOINT_COORDS direct first, blip walk fallback
         if (g_Teleport.toWaypoint) {
             g_Teleport.toWaypoint = false;
-            if (Natives::IsWaypointActive()) {
-                Vec3 wp = Natives::GetWaypointCoords();
-                // Waypoint Z is 0 on the map, so place player a bit above ground
-                Natives::SetEntityCoordsNoOffset(ped, wp.x, wp.y, wp.z + 1.0f);
+            Vec3 wp = Natives::GetWaypointCoordsDirect();
+            if (wp.x == 0.f && wp.y == 0.f && Natives::IsWaypointActive())
+                wp = Natives::GetWaypointCoords();
+            if (wp.x != 0.f || wp.y != 0.f) {
+                s_PendingTp   = wp;
+                s_HasPendingTp = true;
+                s_GroundTries = 0;
+            } else {
+                Log::Write("TP waypoint: nenhum waypoint marcado no mapa.");
             }
         }
 
@@ -172,24 +204,148 @@ namespace C4pt0r::Features
         if (g_Teleport.toSaved) {
             g_Teleport.toSaved = false;
             if (g_Teleport.hasSaved) {
-                Natives::SetEntityCoordsNoOffset(ped,
-                    g_Teleport.savedX, g_Teleport.savedY, g_Teleport.savedZ);
+                DoTeleport(ped, g_Teleport.savedX, g_Teleport.savedY, g_Teleport.savedZ);
+            }
+        }
+
+        // TP to explicit coords
+        if (g_Teleport.toCoords) {
+            g_Teleport.toCoords = false;
+            float gz = 0;
+            if (Natives::GetGroundZ(g_Teleport.tx, g_Teleport.ty, g_Teleport.tz + 300.f, gz))
+                DoTeleport(ped, g_Teleport.tx, g_Teleport.ty, gz);
+            else
+                DoTeleport(ped, g_Teleport.tx, g_Teleport.ty, g_Teleport.tz);
+        }
+
+        // TP to player id
+        if (g_Teleport.toPlayerId >= 0) {
+            int target = g_Teleport.toPlayerId;
+            g_Teleport.toPlayerId = -1;
+            int tped = Natives::GetPlayerPed(target);
+            if (tped) {
+                Vec3 p = Natives::GetEntityCoords(tped);
+                DoTeleport(ped, p.x + 1.5f, p.y, p.z);
+            } else {
+                Log::Write("TP player: id %d sem ped.", target);
+            }
+        }
+
+        // Bring player to me (local-only effect on most servers)
+        if (g_Teleport.bringPlayerId >= 0) {
+            int target = g_Teleport.bringPlayerId;
+            g_Teleport.bringPlayerId = -1;
+            int tped = Natives::GetPlayerPed(target);
+            if (tped) {
+                Vec3 p = Natives::GetEntityCoords(ped);
+                Natives::SetEntityCoordsNoOffset(tped, p.x + 1.5f, p.y, p.z);
+            } else {
+                Log::Write("Bring player: id %d sem ped.", target);
             }
         }
     }
 
-    // ---- ESP data collection (runs in game thread, writes shared buffer) -
-    static void TickESPData()
+    // ---- Vehicle spawn (request model -> wait loaded -> create) ----------
+    enum class VStage { Idle, Loading };
+    static VStage   s_VStage   = VStage::Idle;
+    static uint32_t s_VModel   = 0;
+    static int      s_VTries   = 0;
+
+    static void TickVehicleSpawn()
     {
-        if (!g_ESP.enabled) return;
+        if (g_Vehicle.spawn) {
+            g_Vehicle.spawn = false;
+            uint32_t m = Natives::GetHashKey(g_Vehicle.model);
+            if (!m) {
+                Log::Write("Veiculo: modelo '%s' invalido.", g_Vehicle.model);
+                return;
+            }
+            s_VModel = m;
+            s_VTries = 0;
+            Natives::RequestModel(m);
+            s_VStage = VStage::Loading;
+            return;
+        }
+
+        if (s_VStage != VStage::Loading) return;
+
+        if (++s_VTries > 120) {   // ~2s de espera
+            s_VStage = VStage::Idle;
+            Log::Write("Veiculo: modelo 0x%X nao carregou.", s_VModel);
+            return;
+        }
+        if (!Natives::HasModelLoaded(s_VModel)) return;
+
+        int ped = Natives::PlayerPedId();
+        if (!ped) { s_VStage = VStage::Idle; return; }
+
+        Vec3 pos    = Natives::GetEntityCoords(ped);
+        float head  = Natives::GetEntityHeading(ped);
+        float rad   = head * DEG2RAD;
+        Vec3 spawnAt{ pos.x - sinf(rad) * 5.f, pos.y + cosf(rad) * 5.f, pos.z + 0.5f };
+
+        int veh = Natives::CreateVehicle(s_VModel, spawnAt.x, spawnAt.y, spawnAt.z, head);
+        if (veh) {
+            Natives::SetVehicleOnGroundProperly(veh);
+            if (g_Vehicle.warpIn)
+                Natives::SetPedIntoVehicle(ped, veh, -1);
+            Log::Write("Veiculo spawnado: %s (id %d)", g_Vehicle.model, veh);
+        } else {
+            Log::Write("Veiculo: CREATE_VEHICLE falhou (server pode bloquear).");
+        }
+        Natives::SetModelNoLongerNeeded(s_VModel);
+        s_VStage = VStage::Idle;
+    }
+
+    // ---- RestoreAll: devolve o ped ao estado normal ----------------------
+    //  Chamada no unload, quando o sistema de natives cai e pelo botao
+    //  "Restaurar tudo" — evita ficar preso invisivel/sem colisao.
+    void RestoreAll()
+    {
+        int ped = Natives::PlayerPedId();
+        int player = Natives::PlayerId();
+        if (ped) {
+            __try {
+                Natives::SetEntityVisible(ped, true, false);
+                Natives::SetEntityCollision(ped, true, true);
+                Natives::SetEntityHasGravity(ped, true);
+                Natives::SetEntityVelocity(ped, 0.f, 0.f, 0.f);
+                Natives::SetEntityInvincible(ped, false);
+                Natives::FreezeEntityPosition(ped, false);
+                Natives::SetPedInfiniteAmmoClip(ped, false);
+            } __except (EXCEPTION_EXECUTE_HANDLER) {}
+        }
+        if (player) {
+            __try { Natives::SetRunSprintMultiplier(player, 1.0f); }
+            __except (EXCEPTION_EXECUTE_HANDLER) {}
+        }
+        // limpa flags que mantinham estado
+        g_Player.godmode = g_Player.invisible = g_Player.noRecoil = false;
+        g_Player.infiniteAmmo = g_Player.speedHack = g_Player.noclip = false;
+        g_Farm.running = false;
+        s_WasNoclip = false;
+        Log::Write("RestoreAll: estado do ped restaurado.");
+    }
+
+    // ---- Player data collection (throttled — feeds ESP + player list) ----
+    //  Always runs so the player list works even with ESP off. WorldToScreen
+    //  is only paid for when ESP is actually enabled.
+    static void TickPlayerData()
+    {
+        static auto last = std::chrono::steady_clock::time_point{};
+        auto now = std::chrono::steady_clock::now();
+        if (now - last < std::chrono::milliseconds(150)) return;
+        last = now;
 
         int localPed = Natives::PlayerPedId();
         int localPlayer = Natives::PlayerId();
         if (!localPed) return;
 
         Vec3 localPos = Natives::GetEntityCoords(localPed);
+        bool espOn   = g_ESP.enabled;
 
         std::lock_guard<std::mutex> lock(g_DataMutex);
+        int count = 0;
 
         for (int i = 0; i < MAX_PLAYERS; ++i) {
             g_PlayersData[i].active = false;
@@ -198,33 +354,54 @@ namespace C4pt0r::Features
             if (!Natives::NetworkIsPlayerActive(i)) continue;
 
             int ped = Natives::GetPlayerPed(i);
-            if (!ped || Natives::IsEntityDead(ped)) continue;
+            if (!ped) continue;
+            bool dead = Natives::IsEntityDead(ped);
 
             Vec3 pos = Natives::GetEntityCoords(ped);
             float dist = localPos.Distance(pos);
-            if (dist > g_ESP.maxDistance) continue;
+
+            const char* name = Natives::GetPlayerName(i);
+            char nameBuf[64];
+            if (name) strncpy_s(nameBuf, name, sizeof(nameBuf) - 1);
+            else      snprintf(nameBuf, sizeof(nameBuf), "Player %d", i);
+            nameBuf[sizeof(nameBuf) - 1] = 0;
+
+            int hp    = dead ? 0 : Natives::GetEntityHealth(ped);
+            int maxHp = dead ? 100 : Natives::GetEntityMaxHealth(ped);
+            int armor = dead ? 0 : Natives::GetPedArmour(ped);
+            bool inVeh = Natives::IsPedInAnyVehicle(ped);
+
+            // player list row (always collected)
+            if (count < MAX_PLAYERS) {
+                auto& e = g_PlayerList[count++];
+                e.id = i; e.ped = ped; e.distance = dist;
+                e.health = hp; e.armor = armor;
+                e.inVehicle = inVeh; e.dead = dead;
+                strncpy_s(e.name, nameBuf, sizeof(e.name) - 1);
+            }
+
+            // ESP data — only within range when ESP enabled
+            if (!espOn || dead || dist > g_ESP.maxDistance) continue;
 
             Vec2 screen;
             bool onScreen = Natives::WorldToScreen(pos, screen);
 
             auto& data       = g_PlayersData[i];
             data.active      = true;
+            data.playerId    = i;
+            data.ped         = ped;
             data.worldPos    = pos;
             data.screenPos   = screen;
             data.onScreen    = onScreen;
             data.distance    = dist;
-            data.health      = Natives::GetEntityHealth(ped);
-            data.maxHealth   = Natives::GetEntityMaxHealth(ped);
-            data.armor       = Natives::GetPedArmour(ped);
+            data.health      = hp;
+            data.maxHealth   = maxHp;
+            data.armor       = armor;
             data.isDead      = false;
-
-            const char* name = Natives::GetPlayerName(i);
-            if (name) {
-                strncpy_s(data.name, name, sizeof(data.name) - 1);
-            } else {
-                snprintf(data.name, sizeof(data.name), "Player %d", i);
-            }
+            data.inVehicle   = inVeh;
+            strncpy_s(data.name, nameBuf, sizeof(data.name) - 1);
         }
+        g_PlayerListCount = count;
     }
 
     // ---- Aimbot ---------------------------------------------------------
@@ -467,7 +644,8 @@ namespace C4pt0r::Features
         TickInfiniteAmmo();
         TickNoclip();
         TickTeleport();
-        TickESPData();
+        TickVehicleSpawn();
+        TickPlayerData();
         TickAimbot();
         TickInspector();
         TickFarm();
@@ -529,13 +707,29 @@ namespace C4pt0r::Features
                 drawCorner(right, bottom, -1, -1);
             }
 
-            // ---- Name ----
+            // ---- Name ([id] nome) ----
             if (g_ESP.names) {
-                const char* name = p.name;
-                ImVec2 textSize = ImGui::CalcTextSize(name);
+                char nameBuf[80];
+                snprintf(nameBuf, sizeof(nameBuf), "[%d] %s", p.playerId, p.name);
+                ImVec2 textSize = ImGui::CalcTextSize(nameBuf);
                 drawList->AddText(
                     ImVec2(sx - textSize.x * 0.5f, top - textSize.y - 4),
-                    nameCol, name);
+                    nameCol, nameBuf);
+            }
+
+            // ---- Stats (hp + colete + veiculo) ----
+            if (g_ESP.names) {
+                char statBuf[48];
+                if (p.inVehicle)
+                    snprintf(statBuf, sizeof(statBuf), "%dHP %dA [car]", p.health, p.armor);
+                else if (p.armor > 0)
+                    snprintf(statBuf, sizeof(statBuf), "%dHP %dA", p.health, p.armor);
+                else
+                    snprintf(statBuf, sizeof(statBuf), "%dHP", p.health);
+                ImVec2 st = ImGui::CalcTextSize(statBuf);
+                drawList->AddText(
+                    ImVec2(sx - st.x * 0.5f, bottom + (g_ESP.distance ? 18 : 4)),
+                    IM_COL32(200, 210, 220, 220), statBuf);
             }
 
             // ---- Distance ----

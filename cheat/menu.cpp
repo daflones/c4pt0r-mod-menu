@@ -4,6 +4,7 @@
 
 #include "menu.h"
 #include "globals.h"
+#include "features.h"
 #include "imgui.h"
 
 #include <shellapi.h>
@@ -222,31 +223,134 @@ namespace C4pt0r::Menu
         if (g_Player.noclip) {
             ImGui::SliderFloat("Velocidade##noclip", &g_Player.noclipSpeed, 0.5f, 20.0f, "%.1f");
         }
+
+        SectionHeader("EMERGENCIA");
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.55f, 0.12f, 0.16f, 0.80f));
+        if (ImGui::Button("RESTAURAR TUDO", ImVec2(-1, 32))) {
+            Features::RestoreAll();
+        }
+        ImGui::PopStyleColor();
+        Tooltip("Desfaz invisivel, colisao, godmode, velocidade — se algo ficar 'preso'.");
     }
+
+    // Presets de teleporte (aproximados — GTA V map)
+    struct TpPreset { const char* name; float x, y, z; };
+    static const TpPreset s_Presets[] = {
+        { "Praca (Legion Square)",      215.8f,  -923.3f,  30.7f },
+        { "Pier (Del Perro)",          -1849.4f, -1231.5f, 13.0f },
+        { "Aeroporto (LSIA)",          -1337.0f, -3044.0f, 13.9f },
+        { "Norte (Paleto Bay)",         -223.5f,  6328.9f, 31.5f },
+        { "Sul (Porto de LS)",          -505.4f, -2323.7f,  6.4f },
+    };
 
     static void TabTeleport()
     {
-        SectionHeader("TELEPORTE");
+        SectionHeader("TELEPORTE RAPIDO");
 
-        if (ImGui::Button("TP para Waypoint", ImVec2(-1, 32))) {
+        if (ImGui::Button("TP para Waypoint (marca no mapa)", ImVec2(-1, 32))) {
             g_Teleport.toWaypoint = true;
         }
-        Tooltip("Marca no mapa e teleporta pra la.");
+        Tooltip("Marca um ponto no mapa (esc) e teleporta pra la.");
 
-        ImGui::Spacing();
+        // ---- Presets ----
+        static int s_Preset = 0;
+        const char* names[IM_ARRAYSIZE(s_Presets)];
+        for (int i = 0; i < IM_ARRAYSIZE(s_Presets); ++i) names[i] = s_Presets[i].name;
+        ImGui::Combo("##preset", &s_Preset, names, IM_ARRAYSIZE(names));
+        ImGui::SameLine();
+        if (ImGui::Button("IR##presetbtn", ImVec2(60, 0))) {
+            const auto& p = s_Presets[s_Preset];
+            g_Teleport.tx = p.x; g_Teleport.ty = p.y; g_Teleport.tz = p.z;
+            g_Teleport.toCoords = true;
+        }
 
-        if (ImGui::Button("Salvar posicao", ImVec2(-1, 32))) {
+        // ---- Coords ----
+        static float s_Coords[3] = {};
+        ImGui::SetNextItemWidth(-1);
+        ImGui::InputFloat3("X, Y, Z##tp", s_Coords, "%.1f");
+        if (ImGui::Button("TP por coordenada", ImVec2(-1, 30))) {
+            g_Teleport.tx = s_Coords[0];
+            g_Teleport.ty = s_Coords[1];
+            g_Teleport.tz = s_Coords[2];
+            g_Teleport.toCoords = true;
+        }
+
+        // ---- Saved position ----
+        if (ImGui::Button("Salvar posicao atual", ImVec2(-1, 30))) {
             g_Teleport.hasSaved = true;
+            g_Teleport.savedX = g_Teleport.savedY = g_Teleport.savedZ = 0; // re-captura no tick
         }
 
         if (g_Teleport.hasSaved) {
             ImGui::TextDisabled("Salvo: %.1f, %.1f, %.1f",
                 g_Teleport.savedX, g_Teleport.savedY, g_Teleport.savedZ);
-
-            if (ImGui::Button("TP para posicao salva", ImVec2(-1, 32))) {
+            if (ImGui::Button("TP para posicao salva", ImVec2(-1, 30))) {
                 g_Teleport.toSaved = true;
             }
         }
+
+        // ---- Players ----
+        SectionHeader("JOGADORES");
+
+        static int s_SelPlayer = -1;
+        {
+            std::lock_guard<std::mutex> lock(g_DataMutex);
+            ImGui::BeginChild("##plist", ImVec2(0, 120), ImGuiChildFlags_Border);
+            if (g_PlayerListCount == 0) {
+                ImGui::TextDisabled("  Nenhum jogador online visivel.");
+            }
+            for (int i = 0; i < g_PlayerListCount; ++i) {
+                const auto& p = g_PlayerList[i];
+                char label[128];
+                snprintf(label, sizeof(label), "[%2d] %s  %.0fm%s%s",
+                    p.id, p.name, p.distance,
+                    p.inVehicle ? "  carro" : "",
+                    p.dead ? "  morto" : "");
+                if (ImGui::Selectable(label, s_SelPlayer == p.id))
+                    s_SelPlayer = p.id;
+            }
+            ImGui::EndChild();
+        }
+
+        if (s_SelPlayer >= 0) {
+            ImGui::TextDisabled("Selecionado: ID %d", s_SelPlayer);
+            if (ImGui::Button("IR ATE ELE", ImVec2(ImGui::GetContentRegionAvail().x * 0.48f, 30)))
+                g_Teleport.toPlayerId = s_SelPlayer;
+            ImGui::SameLine();
+            if (ImGui::Button("TRAZER PRA MIM", ImVec2(-1, 30)))
+                g_Teleport.bringPlayerId = s_SelPlayer;
+            Tooltip("Trazer o jogador pra perto de voce (efeito local).");
+        }
+
+        // ---- Vehicles ----
+        SectionHeader("SPAWN DE VEICULO");
+
+        static const char* vehNames[] = {
+            "Adder", "T20", "Oppressor MK2", "Kuruma blindado",
+            "Insurgent", "Sultan RS", "Vigilante", "Sparrow (heli)", "Rhino (tanque)"
+        };
+        static const char* vehModels[] = {
+            "adder", "t20", "oppressor2", "kuruma2",
+            "insurgent2", "sultanrs", "vigilante", "sparrow", "rhino"
+        };
+        static int s_VehIdx = 0;
+        ImGui::Combo("##vehpreset", &s_VehIdx, vehNames, IM_ARRAYSIZE(vehNames));
+
+        static char s_CustomModel[48] = "";
+        ImGui::SetNextItemWidth(-1);
+        ImGui::InputTextWithHint("##vehmodel", "ou digite o modelo (ex: zentorno)",
+                                 s_CustomModel, sizeof(s_CustomModel));
+
+        ImGui::Checkbox("Entrar no veiculo ao spawnar##veh", &g_Vehicle.warpIn);
+
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.00f, 0.55f, 0.30f, 0.80f));
+        if (ImGui::Button("SPAWNAR VEICULO", ImVec2(-1, 34))) {
+            const char* m = s_CustomModel[0] ? s_CustomModel : vehModels[s_VehIdx];
+            strncpy_s(g_Vehicle.model, m, sizeof(g_Vehicle.model) - 1);
+            g_Vehicle.spawn = true;
+        }
+        ImGui::PopStyleColor();
+        Tooltip("Spawn so funciona se o servidor permitir criacao de entidades.");
     }
 
     static void TabTools()
@@ -346,7 +450,7 @@ namespace C4pt0r::Menu
         LinkButton("YouTube  —  C4pt0r - Mods (em breve)", nullptr, -1);
 
         SectionHeader("INFO");
-        ImGui::TextDisabled("C4pt0r Cheats v1.0");
+        ImGui::TextDisabled("C4pt0r Cheats v1.3");
         ImGui::TextDisabled("FiveM Internal");
         ImGui::Spacing();
         ImGui::TextColored(ImVec4(0.00f, 0.83f, 1.00f, 0.7f), "by Larpbase");
@@ -368,7 +472,7 @@ namespace C4pt0r::Menu
         ImGui::TextUnformatted("C4pt0r");
         ImGui::PopStyleColor();
         ImGui::SameLine();
-        ImGui::TextDisabled("v1.0");
+        ImGui::TextDisabled("v1.3");
         ImGui::Separator();
         ImGui::Spacing();
 

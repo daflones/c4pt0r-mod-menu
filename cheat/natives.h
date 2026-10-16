@@ -160,6 +160,19 @@ namespace C4pt0r::Natives
         constexpr uint64_t GET_BLIP_INFO_ID_COORD               = 0xFA7C7F0AADF25D09;
         constexpr uint64_t DOES_BLIP_EXIST                      = 0xA6DB27D19ECBB7DA;
         constexpr uint64_t GET_BLIP_INFO_ID_TYPE                = 0xBE9B0959FFD0779B;
+        constexpr uint64_t GET_WAYPOINT_COORDS                  = 0x29B30D07C3F7873B;
+
+        // Ground / physics
+        constexpr uint64_t GET_GROUND_Z_FOR_3D_COORD            = 0xC906A7F04091EDA8;
+
+        // Vehicle / model
+        constexpr uint64_t GET_HASH_KEY                         = 0xD24D37CC275948CC;
+        constexpr uint64_t REQUEST_MODEL                        = 0x963D27A58DF860AC;
+        constexpr uint64_t HAS_MODEL_LOADED                     = 0x98A4EB5D89A0C952;
+        constexpr uint64_t SET_MODEL_AS_NO_LONGER_NEEDED        = 0xE532F5D78798DAAB;
+        constexpr uint64_t CREATE_VEHICLE                       = 0xAF35D0F2583551B0;
+        constexpr uint64_t SET_PED_INTO_VEHICLE                 = 0xF75B0D629E1C063D;
+        constexpr uint64_t SET_VEHICLE_ON_GROUND_PROPERLY       = 0x49733E92263139D1;
 
         // HUD / screen
         constexpr uint64_t GET_SCREEN_COORD_FROM_WORLD_COORD    = 0x34E82F05DF2974F5;
@@ -231,4 +244,20 @@ namespace C4pt0r::Natives
     // Waypoint
     Vec3         GetWaypointCoords();
     bool         IsWaypointActive();
+    Vec3         GetWaypointCoordsDirect();   // GET_WAYPOINT_COORDS native
+
+    // Ground
+    bool         GetGroundZ(float x, float y, float z, float& outZ);
+
+    // Vehicles
+    uint32_t     GetHashKey(const char* str);
+    void         RequestModel(uint32_t model);
+    bool         HasModelLoaded(uint32_t model);
+    void         SetModelNoLongerNeeded(uint32_t model);
+    int          CreateVehicle(uint32_t model, float x, float y, float z, float heading);
+    void         SetPedIntoVehicle(int ped, int vehicle, int seat);
+    void         SetVehicleOnGroundProperly(int vehicle);
+
+    // Recovery
+    bool         ReInitialize();   // re-resolve exports after path failure
 }

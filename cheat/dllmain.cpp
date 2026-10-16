@@ -144,6 +144,7 @@ static void MainThread(HMODULE hModule)
 
     // ---- Main loop: tick features every frame ----
     int consecutiveErrors = 0;
+    int recoveryWait = 0;
     while (g_Running) {
         if (nativesOk) {
             __try {
@@ -155,8 +156,31 @@ static void MainThread(HMODULE hModule)
                 Log::Write("EXCEPTION in Features::Tick(), code 0x%08X (#%d)",
                            GetExceptionCode(), consecutiveErrors);
                 if (consecutiveErrors >= 25) {
+                    // NAO mata as features pra sempre — restaura o ped
+                    // (evita ficar invisivel/sem colisao) e tenta re-
+                    // inicializar os natives sozinho a cada ~5s.
                     nativesOk = false;
-                    Log::Write("Features disabled after repeated crashes.");
+                    recoveryWait = 0;
+                    consecutiveErrors = 0;
+                    Log::Write("Features pausadas por excecoes — restaurando ped e agendando re-init.");
+                    __try { Features::RestoreAll(); }
+                    __except (EXCEPTION_EXECUTE_HANDLER) {}
+                }
+            }
+        } else {
+            // auto-recovery: re-resolve + re-probe periodically
+            if (++recoveryWait >= 312) {   // ~5s em passos de 16ms
+                recoveryWait = 0;
+                Log::Write("Tentando re-inicializar natives...");
+                __try {
+                    if (Natives::ReInitialize()) {
+                        nativesOk = true;
+                        Log::Write("Natives recuperados — features reativadas.");
+                    }
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER) {
+                    Log::Write("Re-init threw (0x%08X), tentando de novo depois.",
+                               GetExceptionCode());
                 }
             }
         }
@@ -165,6 +189,12 @@ static void MainThread(HMODULE hModule)
 
     // ---- Cleanup ----
     Log::Write("Shutting down...");
+    // devolve o ped ao normal antes de sair — nunca deixar invisivel/
+    // sem colisao preso depois do unload
+    if (nativesOk || Natives::IsReady()) {
+        __try { Features::RestoreAll(); }
+        __except (EXCEPTION_EXECUTE_HANDLER) {}
+    }
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
     Hooks::Shutdown();
     std::this_thread::sleep_for(std::chrono::milliseconds(100));

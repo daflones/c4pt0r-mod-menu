@@ -88,6 +88,17 @@ namespace C4pt0r
         float savedX = 0, savedY = 0, savedZ = 0;
         bool  hasSaved   = false;
         bool  toSaved    = false;   // one-shot flag
+        // one-shot targets consumed by TickTeleport
+        bool  toCoords   = false;
+        float tx = 0, ty = 0, tz = 0;
+        int   toPlayerId    = -1;   // >=0 -> go to that player's position
+        int   bringPlayerId = -1;   // >=0 -> move that player to us
+    };
+
+    struct VehicleConfig {
+        bool  spawn    = false;     // one-shot flag
+        bool  warpIn   = true;      // enter vehicle after spawn
+        char  model[48] = {};
     };
 
     struct MenuConfig {
@@ -113,7 +124,7 @@ namespace C4pt0r
         int   cyclesDone   = 0;       // progress counter
 
         // live inspector state (written by Tick, read by menu)
-        bool  inspEnabled  = true;
+        bool  inspEnabled  = false;   // OFF by default — user opts in
     };
 
     // Live inspector snapshot — refreshed every tick when enabled
@@ -136,6 +147,8 @@ namespace C4pt0r
     // ---------------------------------------- ESP shared data (thread-safe)
     struct PlayerESPData {
         bool  active   = false;
+        int   playerId = -1;
+        int   ped      = 0;
         Vec3  worldPos;
         Vec2  screenPos;
         bool  onScreen = false;
@@ -145,6 +158,19 @@ namespace C4pt0r
         int   armor    = 0;
         char  name[64] = {};
         bool  isDead   = false;
+        bool  inVehicle = false;
+    };
+
+    // Lightweight row for the player list (menu teleport/inspect)
+    struct PlayerListEntry {
+        int   id        = -1;
+        int   ped       = 0;
+        float distance  = 0.f;
+        int   health    = 0;
+        int   armor     = 0;
+        bool  inVehicle = false;
+        bool  dead      = false;
+        char  name[64]  = {};
     };
 
     // ------------------------------------------------------- Global singletons
@@ -168,8 +194,11 @@ namespace C4pt0r
 
     // ESP shared buffer
     constexpr int MAX_PLAYERS = 256;
-    inline PlayerESPData g_PlayersData[MAX_PLAYERS] = {};
-    inline std::mutex    g_DataMutex;
+    inline PlayerESPData    g_PlayersData[MAX_PLAYERS] = {};
+    inline PlayerListEntry  g_PlayerList[MAX_PLAYERS] = {};
+    inline int              g_PlayerListCount = 0;
+    inline std::mutex       g_DataMutex;
+    inline VehicleConfig    g_Vehicle;
     inline int           g_ScreenWidth  = 1920;
     inline int           g_ScreenHeight = 1080;
 }

@@ -10,4 +10,9 @@ namespace C4pt0r::Features
 
     // Called every frame from the Present hook (ImGui draw list available)
     void RenderOverlay();
+
+    // Restaura o ped ao estado normal (visivel, colisao, gravidade,
+    // invencivel off, velocidade zerada) — unload, falha de natives,
+    // botao "Restaurar tudo".
+    void RestoreAll();
 }
