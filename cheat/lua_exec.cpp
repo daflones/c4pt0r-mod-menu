@@ -1,9 +1,11 @@
 #include "lua_exec.h"
 #include "logger.h"
+#include "deps/minhook/include/MinHook.h"
 #include <Windows.h>
 #include <cstring>
 #include <cstdint>
 #include <cstdlib>
+#include <csetjmp>
 
 namespace C4pt0r::LuaExec
 {
@@ -36,14 +38,28 @@ namespace C4pt0r::LuaExec
         size_t      numIsolatedBuffers;
     };
 
-    using FromHashFn = const void* (__cdecl*)(uint64_t hash);
-    using InvokeFn   = void (__fastcall*)(FxCtx* ctx);
+    using FromHashFn     = const void* (__cdecl*)(uint64_t hash);
+    using InvokeFn       = void (__fastcall*)(FxCtx* ctx);
+    using ScriptErrorFn  = void (__fastcall*)(FxCtx* ctx, const char* msg);
 
     static FromHashFn s_FromHash = nullptr;
     static InvokeFn   s_Invoke   = nullptr;
     static bool       s_Ok       = false;
     static int        s_Tries    = 0;
     static char       s_Status[96] = "invoker: procurando exports";
+
+    static ScriptErrorFn s_OrigScriptError = nullptr;
+    static jmp_buf       s_Jb;
+    static __declspec(thread) int s_OurCall = 0;
+
+    static void __fastcall hk_ScriptError(FxCtx* ctx, const char* msg)
+    {
+        if (s_OurCall) {
+            Log::Write("LuaExec ScriptError: %s", msg ? msg : "?");
+            longjmp(s_Jb, 1);
+        }
+        s_OrigScriptError(ctx, msg);
+    }
 
     static uint64_t JoaatHash(const char* s)
     {
@@ -80,6 +96,17 @@ namespace C4pt0r::LuaExec
             s_FromHash = nullptr; s_Invoke = nullptr;
             return;
         }
+
+        FARPROC se = GetProcAddress(core,
+            "?ScriptError@ScriptNativeContext@invoker@fx@@QEBAXPEBD@Z");
+        if (se) {
+            MH_Initialize();
+            if (MH_CreateHook((void*)se, (void*)hk_ScriptError,
+                              (void**)&s_OrigScriptError) == MH_OK &&
+                MH_EnableHook((void*)se) == MH_OK) {
+                Log::Write("LuaExec: ScriptError neutered.");
+            }
+        }
         s_Ok = true;
         snprintf(s_Status, sizeof(s_Status), "server events: pronto");
         Log::Write("LuaExec: invoker CFX ok (FromHash=0x%p Invoke=0x%p).",
@@ -88,6 +115,8 @@ namespace C4pt0r::LuaExec
 
     bool Ready() { return s_Ok; }
     const char* Status() { return s_Status; }
+
+    static bool DoInvoke(FxCtx* ctx, uintptr_t* ret);
 
     static bool CallFx(uint64_t hash, uintptr_t* args, FxArgType* types,
                        int nargs, uintptr_t* ret)
@@ -111,9 +140,21 @@ namespace C4pt0r::LuaExec
         ctx.rettypes[0] = 9;
         ctx.numReturnValues = 1;
 
+        s_OurCall = 1;
+        if (setjmp(s_Jb) != 0) {
+            s_OurCall = 0;
+            return false;
+        }
+        bool ok = DoInvoke(&ctx, ret);
+        s_OurCall = 0;
+        return ok;
+    }
+
+    static bool DoInvoke(FxCtx* ctx, uintptr_t* ret)
+    {
         __try {
-            s_Invoke(&ctx);
-            if (ret) ret[0] = ctx.results[0];
+            s_Invoke(ctx);
+            if (ret) ret[0] = ctx->results[0];
             return true;
         }
         __except (EXCEPTION_EXECUTE_HANDLER) {
