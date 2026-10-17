@@ -6,6 +6,7 @@
 
 #include "globals.h"
 #include <cstdint>
+#include <atomic>
 
 namespace C4pt0r::Natives
 {
@@ -263,6 +264,14 @@ namespace C4pt0r::Natives
     void         MarkUnhealthy();            // force re-init on next cycle
     long long    MsSinceOk();                // ms since last successful call
     void         HealthString(char* buf, int len);
+
+    // Hang diagnostics — a native call that blocks inside the script engine
+    // used to kill the feature thread silently. The supervisor watches the
+    // heartbeat and retires the path that hung, then respawns the loop.
+    extern std::atomic<uint64_t> g_InvokeHash;  // hash da native em voo (0=idle)
+    extern std::atomic<int>      g_InvokePath;  // path em voo: 0 nenhum,1 A,2 B,3 C
+    extern std::atomic<int64_t>  g_TickBeat;    // heartbeat do loop de features
+    void         RetirePath(int path);          // aposenta o path que travou
 
     // Generic by-name invocation — hash computed at runtime (joaat).
     // Returns false if the native doesn't exist on this build (safe to probe).

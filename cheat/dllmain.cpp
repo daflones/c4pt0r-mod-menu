@@ -11,6 +11,7 @@
 
 #include <thread>
 #include <chrono>
+#include <atomic>
 #include <winternl.h>
 
 using namespace C4pt0r;
@@ -72,6 +73,109 @@ static void RelinkModule()
         }
     }
     s_Unlinked = false;
+}
+
+static int64_t NowMs()
+{
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+// ---- Feature loop (runs on its own thread, watched by the supervisor) ---
+//  Generation check: when the supervisor detects the loop hung inside a
+//  blocked native it bumps s_FeatureGen — the zombie loop exits as soon as
+//  its blocked call returns, while a fresh loop takes over immediately.
+static std::atomic<uint64_t> s_FeatureGen{0};
+static std::atomic<int>      s_FeatureThreads{0};
+
+static void FeatureLoop()
+{
+    ++s_FeatureThreads;
+    const uint64_t myGen = s_FeatureGen.load();
+    bool nativesOk = Natives::IsReady();
+    int consecutiveErrors = 0;
+    int recoveryWait = 0;
+    int watchTicks = 0;
+    int deadPings  = 0;
+
+    while (g_Running && s_FeatureGen.load() == myGen) {
+        Natives::g_TickBeat = NowMs();
+        if (nativesOk) {
+            __try {
+                Features::Tick();
+                consecutiveErrors = 0;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) {
+                ++consecutiveErrors;
+                Log::Write("EXCEPTION in Features::Tick(), code 0x%08X (#%d)",
+                           GetExceptionCode(), consecutiveErrors);
+                if (consecutiveErrors >= 25) {
+                    // NAO mata as features pra sempre — restaura o ped
+                    // (evita ficar invisivel/sem colisao) e tenta re-
+                    // inicializar os natives sozinho a cada ~5s.
+                    nativesOk = false;
+                    recoveryWait = 0;
+                    consecutiveErrors = 0;
+                    Natives::MarkUnhealthy();
+                    Log::Write("Features pausadas por excecoes — restaurando ped e agendando re-init.");
+                    __try { Features::RestoreEntity(); }   // mantem toggles do user
+                    __except (EXCEPTION_EXECUTE_HANDLER) {}
+                }
+            }
+
+            // Watchdog: natives tambem morrem SEM jogar excecao (CallNative
+            // retorna false, todos os paths falham). Nesse caso o tick roda
+            // mas nada acontece — era o "menu fantasma". Pinga um nativo
+            // seguro a cada ~2s; 2 falhas = declara morto e re-inicializa.
+            if (++watchTicks >= 120) {   // 120 x 16ms ~= 2s
+                watchTicks = 0;
+                bool alive = false;
+                __try { alive = Natives::Ping(); }
+                __except (EXCEPTION_EXECUTE_HANDLER) { alive = false; }
+                if (!alive) {
+                    if (++deadPings >= 2) {
+                        deadPings = 0;
+                        nativesOk = false;
+                        recoveryWait = 0;
+                        Natives::MarkUnhealthy();
+                        Log::Write("Watchdog: natives pararam de responder "
+                                   "sem excecao — re-init agendado.");
+                        __try { Features::RestoreEntity(); }
+                        __except (EXCEPTION_EXECUTE_HANDLER) {}
+                    }
+                } else {
+                    deadPings = 0;
+                }
+            }
+        } else {
+            // auto-recovery: re-resolve + re-probe periodically
+            if (++recoveryWait >= 312) {   // ~5s em passos de 16ms
+                recoveryWait = 0;
+                Log::Write("Tentando re-inicializar natives...");
+                __try {
+                    if (Natives::ReInitialize()) {
+                        nativesOk = true;
+                        Log::Write("Natives recuperados — features reativadas.");
+                    }
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER) {
+                    Log::Write("Re-init threw (0x%08X), tentando de novo depois.",
+                               GetExceptionCode());
+                }
+            }
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(16));
+    }
+    --s_FeatureThreads;
+}
+
+//  CreateThread puro: std::thread teria destrutor e impediria __try no
+//  MainThread (C2712)
+static DWORD WINAPI FeatureThreadProc(LPVOID) { FeatureLoop(); return 0; }
+static void SpawnFeatureLoop()
+{
+    HANDLE h = CreateThread(nullptr, 0, FeatureThreadProc, nullptr, 0, nullptr);
+    if (h) CloseHandle(h);
 }
 
 // ---- Main cheat thread --------------------------------------------------
@@ -140,79 +244,39 @@ static void MainThread(HMODULE hModule)
         Log::Write("Native system OK.");
     }
 
-    Log::Write("Entering main loop. F9 = menu, END = unload.");
+    Log::Write("Entering supervisor loop. F9 = menu, END = unload.");
 
-    // ---- Main loop: tick features every frame ----
-    int consecutiveErrors = 0;
-    int recoveryWait = 0;
-    int watchTicks = 0;
-    int deadPings  = 0;
+    // ---- Supervisor ----------------------------------------------------
+    //  The feature loop lives on its own thread. If a native call blocks
+    //  inside the engine (the "menu fantasma"), the heartbeat goes stale —
+    //  we retire the in-flight path and respawn the loop so the cheat can
+    //  NEVER stay dead. The zombie thread exits by itself via s_FeatureGen
+    //  as soon as its blocked call returns.
+    Natives::g_TickBeat = NowMs();
+    SpawnFeatureLoop();
+
     while (g_Running) {
-        if (nativesOk) {
-            __try {
-                Features::Tick();
-                consecutiveErrors = 0;
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER) {
-                ++consecutiveErrors;
-                Log::Write("EXCEPTION in Features::Tick(), code 0x%08X (#%d)",
-                           GetExceptionCode(), consecutiveErrors);
-                if (consecutiveErrors >= 25) {
-                    // NAO mata as features pra sempre — restaura o ped
-                    // (evita ficar invisivel/sem colisao) e tenta re-
-                    // inicializar os natives sozinho a cada ~5s.
-                    nativesOk = false;
-                    recoveryWait = 0;
-                    consecutiveErrors = 0;
-                    Natives::MarkUnhealthy();
-                    Log::Write("Features pausadas por excecoes — restaurando ped e agendando re-init.");
-                    __try { Features::RestoreEntity(); }   // mantem toggles do user
-                    __except (EXCEPTION_EXECUTE_HANDLER) {}
-                }
-            }
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        if (!g_Running) break;
 
-            // Watchdog: natives tambem morrem SEM jogar excecao (CallNative
-            // retorna false, todos os paths falham). Nesse caso o tick roda
-            // mas nada acontece — era o "menu fantasma". Pinga um nativo
-            // seguro a cada ~2s; 2 falhas = declara morto e re-inicializa.
-            if (++watchTicks >= 120) {   // 120 x 16ms ~= 2s
-                watchTicks = 0;
-                bool alive = false;
-                __try { alive = Natives::Ping(); }
-                __except (EXCEPTION_EXECUTE_HANDLER) { alive = false; }
-                if (!alive) {
-                    if (++deadPings >= 2) {
-                        deadPings = 0;
-                        nativesOk = false;
-                        recoveryWait = 0;
-                        Natives::MarkUnhealthy();
-                        Log::Write("Watchdog: natives pararam de responder "
-                                   "sem excecao — re-init agendado.");
-                        __try { Features::RestoreEntity(); }
-                        __except (EXCEPTION_EXECUTE_HANDLER) {}
-                    }
-                } else {
-                    deadPings = 0;
-                }
-            }
-        } else {
-            // auto-recovery: re-resolve + re-probe periodically
-            if (++recoveryWait >= 312) {   // ~5s em passos de 16ms
-                recoveryWait = 0;
-                Log::Write("Tentando re-inicializar natives...");
-                __try {
-                    if (Natives::ReInitialize()) {
-                        nativesOk = true;
-                        Log::Write("Natives recuperados — features reativadas.");
-                    }
-                }
-                __except (EXCEPTION_EXECUTE_HANDLER) {
-                    Log::Write("Re-init threw (0x%08X), tentando de novo depois.",
-                               GetExceptionCode());
-                }
-            }
+        int64_t beat = Natives::g_TickBeat.load();
+        int64_t staleMs = beat ? NowMs() - beat : 0;
+        if (staleMs > 4000) {
+            uint64_t hungHash = Natives::g_InvokeHash.load();
+            int      hungPath = Natives::g_InvokePath.load();
+            Log::Write("SUPERVISOR: feature loop travado ha %lldms "
+                       "(native 0x%016llX path %d) — aposentando path e "
+                       "respawnando o loop.",
+                       (long long)staleMs,
+                       (unsigned long long)hungHash, hungPath);
+            if (hungPath) Natives::RetirePath(hungPath);
+            ++s_FeatureGen;                        // mata o loop velho quando destravar
+            Natives::g_TickBeat = NowMs();
+            SpawnFeatureLoop();                    // loop novo assume
+            __try { Features::RestoreEntity(); }   // devolve o ped por seguranca
+            __except (EXCEPTION_EXECUTE_HANDLER) {}
+            std::this_thread::sleep_for(std::chrono::milliseconds(2000));
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(16));
     }
 
     // ---- Cleanup ----
@@ -223,9 +287,23 @@ static void MainThread(HMODULE hModule)
         __try { Features::RestoreAll(); }
         __except (EXCEPTION_EXECUTE_HANDLER) {}
     }
+
+    // Espera as feature threads sairem — se alguma esta travada dentro de
+    // um native ela nunca volta, e liberar a DLL com codigo nosso em
+    // execucao = crash. Nesse caso vazamos o modulo em vez de crashar.
+    for (int i = 0; i < 40 && s_FeatureThreads.load() > 0; ++i)
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    const bool zombieLeft = s_FeatureThreads.load() > 0;
+
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
     Hooks::Shutdown();
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    if (zombieLeft) {
+        Log::Write("Feature thread travada no unload — saindo SEM FreeLibrary (modulo fica residente, sem crash).");
+        Log::Close();
+        return;
+    }
 
     // Relink so FreeLibrary can find our LDR entry again
     RelinkModule();

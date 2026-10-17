@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <set>
 #include <chrono>
+#include <atomic>
 
 namespace C4pt0r::Natives
 {
@@ -71,6 +72,31 @@ namespace C4pt0r::Natives
     static uint64_t s_OkCount   = 0;
     static uint64_t s_FailCount = 0;
     static int64_t  s_LastOkMs  = 0;
+
+    // ---- Hang diagnostics --------------------------------------------------
+    //  If a native call blocks INSIDE the engine (script lock during a
+    //  session transition) the whole feature thread dies silently while the
+    //  menu/render thread keeps pinging fine — the "menu fantasma". The
+    //  supervisor watches g_TickBeat; when it goes stale it retires the
+    //  in-flight path (s_BanX) and respawns the loop.
+    std::atomic<uint64_t> g_InvokeHash{0};
+    std::atomic<int>      g_InvokePath{0};
+    std::atomic<int64_t>  g_TickBeat{0};
+    static std::atomic<bool> s_BanA{false}, s_BanB{false}, s_BanC{false};
+
+    void RetirePath(int path) {
+        if (path == 1 && !s_BanA.exchange(true)) {
+            s_CallNative = nullptr;
+            Log::Write("Path A (CallNativeHandler) APOSENTADO — travou a thread.");
+        } else if (path == 2 && !s_BanB.exchange(true)) {
+            s_RageGNH = nullptr;
+            Log::Write("Path B (rage GetNativeHandler) APOSENTADO — travou a thread.");
+        } else if (path == 3 && !s_BanC.exchange(true)) {
+            s_GetNativeHandler = nullptr;
+            Log::Write("Path C (raw table) APOSENTADO — travou a thread.");
+        }
+    }
+
     static int64_t NowMs() {
         return std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now().time_since_epoch()).count();
@@ -106,42 +132,21 @@ namespace C4pt0r::Natives
 
     // ---- Unified native call ---------------------------------------------
     //  Fills ret[0..3] (float-packed for Vec3), returns false on failure.
+    //  Order: B (direct rage handler — pure function, no script-engine
+    //  locks) -> C (raw table) -> A (scripting-gta CallNativeHandler, which
+    //  goes through the engine and is the historical source of thread
+    //  hangs) last. g_InvokePath marks which path is in flight so the
+    //  supervisor can retire exactly the one that hung.
     bool CallNative(uint64_t hash, const uint64_t* args, int nargs,
                     uint64_t* ret)
     {
         MaybeReResolve();
         bool anyHandler = false;
-
-        // Path A: FiveM's exported high-level invoke (does everything)
-        if (s_CallNative) {
-            FxScriptContext ctx;
-            ctx.Reset();
-            for (int i = 0; i < nargs; ++i) ctx.args[i] = args[i];
-            ctx.numArgs = nargs;
-            bool threw = false;
-            bool ok = InvokePathA(hash, ctx, threw);
-            if (ok) {
-                s_FailA = 0;
-                ++s_OkCount; s_LastOkMs = NowMs();
-                if (ret) {
-                    ret[0] = ctx.rets[0];
-                    ret[1] = ctx.rets[1];
-                    ret[2] = ctx.rets[2];
-                    ret[3] = ctx.rets[3];
-                }
-                return true;
-            }
-            // false sem fault = native recusado/ausente — NAO penaliza o
-            // path (foi isso que aposentava os paths por natives faltando).
-            // So conta quando a chamada em si explode (SEH).
-            if (threw && ++s_FailA >= PATH_FAIL_LIMIT) {
-                s_CallNative = nullptr;
-                Log::Write("CallNativeHandler path died (%d faults) — dropping to rage path.", s_FailA);
-            }
-        }
+        g_InvokeHash = hash;
 
         // Path B: exported scrEngine::GetNativeHandler -> call raw handler
-        if (s_RageGNH) {
+        if (s_RageGNH && !s_BanB) {
+            g_InvokePath = 2;
             NativeHandler h = nullptr;
             __try { h = s_RageGNH(hash); }
             __except (EXCEPTION_EXECUTE_HANDLER) { h = nullptr; }
@@ -157,6 +162,7 @@ namespace C4pt0r::Natives
                         ret[0] = rv[0]; ret[1] = rv[1];
                         ret[2] = rv[2]; ret[3] = rv[3];
                     }
+                    g_InvokePath = 0; g_InvokeHash = 0;
                     return true;
                 }
                 // handler existia mas explodiu — falha real do path
@@ -170,8 +176,9 @@ namespace C4pt0r::Natives
         }
 
         // Path C: raw table walk (mapped hash, raw handler — likely
-        // adhesive-encrypted on this build; still try as last resort)
-        if (s_GetNativeHandler && s_NativeTable) {
+        // adhesive-encrypted on this build; still try as fallback)
+        if (s_GetNativeHandler && s_NativeTable && !s_BanC) {
+            g_InvokePath = 3;
             NativeHandler h = nullptr;
             uint64_t h2 = s_MapNative ? s_MapNative(hash) : hash;
             __try { h = s_GetNativeHandler(s_NativeTable, h2); }
@@ -188,15 +195,50 @@ namespace C4pt0r::Natives
                         ret[0] = rv[0]; ret[1] = rv[1];
                         ret[2] = rv[2]; ret[3] = rv[3];
                     }
+                    g_InvokePath = 0; g_InvokeHash = 0;
                     return true;
                 }
                 if (++s_FailC >= PATH_FAIL_LIMIT) {
                     s_GetNativeHandler = nullptr;
-                    Log::Write("Raw table path died (%d faults) — no native paths left.", s_FailC);
+                    Log::Write("Raw table path died (%d faults).", s_FailC);
                 }
             }
         }
 
+        // Path A: FiveM's exported high-level invoke (does everything —
+        // MapNative + decrypt + context marshal). Goes through script-engine
+        // internals, so it's the LAST resort: if it ever hangs, the
+        // supervisor retires it and the direct paths keep working.
+        if (s_CallNative && !s_BanA) {
+            g_InvokePath = 1;
+            FxScriptContext ctx;
+            ctx.Reset();
+            for (int i = 0; i < nargs; ++i) ctx.args[i] = args[i];
+            ctx.numArgs = nargs;
+            bool threw = false;
+            bool ok = InvokePathA(hash, ctx, threw);
+            if (ok) {
+                s_FailA = 0;
+                ++s_OkCount; s_LastOkMs = NowMs();
+                if (ret) {
+                    ret[0] = ctx.rets[0];
+                    ret[1] = ctx.rets[1];
+                    ret[2] = ctx.rets[2];
+                    ret[3] = ctx.rets[3];
+                }
+                g_InvokePath = 0; g_InvokeHash = 0;
+                return true;
+            }
+            // false sem fault = native recusado/ausente — NAO penaliza o
+            // path (foi isso que aposentava os paths por natives faltando).
+            // So conta quando a chamada em si explode (SEH).
+            if (threw && ++s_FailA >= PATH_FAIL_LIMIT) {
+                s_CallNative = nullptr;
+                Log::Write("CallNativeHandler path died (%d faults).", s_FailA);
+            }
+        }
+
+        g_InvokePath = 0; g_InvokeHash = 0;
         ++s_FailCount;
         if (!anyHandler) LogMissingHash(hash);   // diagnostico: native nao existe
         return false;
@@ -208,7 +250,7 @@ namespace C4pt0r::Natives
         HMODULE sgta = GetModuleHandleW(L"scripting-gta.dll");
         HMODULE rsf  = GetModuleHandleW(L"rage-scripting-five.dll");
 
-        if (sgta) {
+        if (sgta && !s_BanA) {
             s_CallNative = reinterpret_cast<FxCallNativeHandler>(GetProcAddress(sgta,
                 "?CallNativeHandler@ScriptEngine@fx@@SA_N_KAEAVScriptContext@2@@Z"));
             if (s_CallNative) s_FailA = 0;   // re-armed path ganha chance nova
@@ -216,10 +258,12 @@ namespace C4pt0r::Natives
                        reinterpret_cast<void*>(s_CallNative));
         }
         if (rsf) {
-            s_RageGNH = reinterpret_cast<RageGetNativeHandler>(GetProcAddress(rsf,
-                "?GetNativeHandler@scrEngine@rage@@SAP6AXPEAVscrNativeCallContext@2@@Z_K@Z"));
+            if (!s_BanB) {
+                s_RageGNH = reinterpret_cast<RageGetNativeHandler>(GetProcAddress(rsf,
+                    "?GetNativeHandler@scrEngine@rage@@SAP6AXPEAVscrNativeCallContext@2@@Z_K@Z"));
+                if (s_RageGNH) s_FailB = 0;
+            }
             s_MapNative = reinterpret_cast<MapNativeFn>(GetProcAddress(rsf, "MapNative"));
-            if (s_RageGNH) s_FailB = 0;
             Log::Write("rage-scr-five GetNativeHandler = 0x%p  MapNative = 0x%p",
                        reinterpret_cast<void*>(s_RageGNH),
                        reinterpret_cast<void*>(s_MapNative));
@@ -267,7 +311,7 @@ namespace C4pt0r::Natives
             Log::Write("No resolver call near site.");
             return false;
         }
-        s_GetNativeHandler = reinterpret_cast<GetNativeHandlerFn>(
+        s_GetNativeHandler = s_BanC ? nullptr : reinterpret_cast<GetNativeHandlerFn>(
             Memory::ResolveRIP(callAt, 1, 5));
         s_FailC = 0;
 
@@ -347,12 +391,26 @@ namespace C4pt0r::Natives
         return (long long)(NowMs() - s_LastOkMs);
     }
 
-    // "OK a=0 b=0 c=0 | ok=1234 fail=2" — shown in Settings for debug
+    // "paths[..] ok=N fail=N lastOk=Xms tick=Xms" — shown in Settings
     void HealthString(char* buf, int len) {
-        snprintf(buf, len, "paths[A:%d B:%d C:%d] ok=%llu fail=%llu lastOk=%lldms%s",
-                 s_FailA, s_FailB, s_FailC,
-                 (unsigned long long)s_OkCount, (unsigned long long)s_FailCount,
-                 MsSinceOk(), s_Ready ? "" : " NOT-READY");
+        int64_t beat = g_TickBeat.load();
+        long long tickMs = beat ? (long long)(NowMs() - beat) : -1;
+        uint64_t h = g_InvokeHash.load();
+        if (h) {
+            snprintf(buf, len,
+                     "paths[A:%d B:%d C:%d] ok=%llu fail=%llu lastOk=%lldms tick=%lldms | em voo: 0x%llX (path %d)%s",
+                     s_FailA, s_FailB, s_FailC,
+                     (unsigned long long)s_OkCount, (unsigned long long)s_FailCount,
+                     MsSinceOk(), tickMs,
+                     (unsigned long long)h, g_InvokePath.load(),
+                     s_Ready ? "" : " NOT-READY");
+        } else {
+            snprintf(buf, len,
+                     "paths[A:%d B:%d C:%d] ok=%llu fail=%llu lastOk=%lldms tick=%lldms%s",
+                     s_FailA, s_FailB, s_FailC,
+                     (unsigned long long)s_OkCount, (unsigned long long)s_FailCount,
+                     MsSinceOk(), tickMs, s_Ready ? "" : " NOT-READY");
+        }
     }
 
     bool ReInitialize() { return Initialize(); }
