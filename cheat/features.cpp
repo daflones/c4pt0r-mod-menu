@@ -14,6 +14,7 @@
 #include "globals.h"
 #include "natives.h"
 #include "memory.h"
+#include "lua_exec.h"
 #include "imgui.h"
 
 #include <cmath>
@@ -1507,6 +1508,64 @@ namespace C4pt0r::Features
         }
     }
 
+    // ---- Executor de Lua ------------------------------------------------
+    //  Dispara TriggerServerEvent de verdade via lua_State capturado do ScRT.
+    //  Os presets atiram a bateria de eventos achados na varredura — o server
+    //  responde pro que existir e ignora o resto.
+    static void TickLua()
+    {
+        LuaExec::Init();   // lazy — tenta capturar um lua_State
+
+        if (g_Lua.preset) {
+            int p = g_Lua.preset;
+            int t = g_Lua.targetId;
+            g_Lua.preset = 0;
+
+            char buf[4096];
+            if (p == 4) {
+                // reviver a si mesmo (client+server events)
+                snprintf(buf, sizeof(buf),
+                    "TriggerEvent('esx_ambulancejob:revive')\n"
+                    "TriggerServerEvent('hospital:server:RevivePlayer',"
+                    "GetPlayerServerId(PlayerId()))\n");
+            } else if (t >= 0) {
+                const char* body = "";
+                if (p == 1) {      // ressuscitar alvo — bateria de eventos
+                    body =
+                        "TriggerServerEvent('hospital:server:RevivePlayer',s)\n"
+                        "TriggerServerEvent('esx_ambulancejob:revive',s)\n"
+                        "TriggerServerEvent('qb-ambulancejob:revive',s)\n"
+                        "TriggerServerEvent('osp_ambulance:revive',s)\n"
+                        "TriggerServerEvent('wasabi_ambulance:revive',s)\n"
+                        "TriggerServerEvent('paramedico:reanimar',s)\n"
+                        "TriggerServerEvent('hospital:reanimar',s)\n"
+                        "TriggerServerEvent('vrp:reanimar',s)\n";
+                } else if (p == 2) {   // carregar alvo
+                    body =
+                        "TriggerServerEvent('CarryPeople:sync',s)\n"
+                        "TriggerServerEvent('esx_ambulancejob:drag',s)\n"
+                        "TriggerServerEvent('police:drag',s)\n";
+                } else if (p == 3) {   // god no alvo
+                    body =
+                        "TriggerServerEvent('admin:god',s)\n"
+                        "TriggerServerEvent('vrp:god',s)\n"
+                        "TriggerServerEvent('god:player',s)\n";
+                }
+                snprintf(buf, sizeof(buf),
+                    "local s=GetPlayerServerId(%d)\n%s", t, body);
+            }
+            if (buf[0]) {
+                if (LuaExec::Run(buf) == 0)
+                    Log::Write("Lua: preset %d disparado (alvo %d).", p, t);
+            }
+        }
+
+        if (g_Lua.run) {
+            g_Lua.run = false;
+            if (g_Lua.code[0]) LuaExec::Run(g_Lua.code);
+        }
+    }
+
     // ---- Main tick (called from cheat thread) ---------------------------
     void Tick()
     {
@@ -1540,6 +1599,7 @@ namespace C4pt0r::Features
         Natives::g_TickStage = 14; TickMechanic();
         Natives::g_TickStage = 15; TickWeapons();
         Natives::g_TickStage = 16; TickPlayerActions();
+        Natives::g_TickStage = 17; TickLua();
         Natives::g_TickStage = 0;
     }
 

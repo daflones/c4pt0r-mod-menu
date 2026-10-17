@@ -218,6 +218,14 @@ namespace C4pt0r
         bool  grabActive   = false;  // estado — tem alguem carregado (menu le)
     };
 
+    // ---------------------------------------------- Executor de Lua
+    struct LuaConfig {
+        char  code[8192] = "";    // script custom do editor
+        bool  run        = false; // one-shot: executar code agora
+        int   preset     = 0;     // 1 revive alvo / 2 carry alvo / 3 god alvo / 4 reviver eu
+        int   targetId   = -1;    // player local id do preset
+    };
+
     // ---------------------------------------------- Armas
     struct WeaponConfig {
         bool  give        = false;
@@ -335,6 +343,7 @@ namespace C4pt0r
     inline MechanicConfig   g_Mech;
     inline WeaponConfig     g_Weapon;
     inline PlayerActionsConfig g_PActions;
+    inline LuaConfig           g_Lua;
     inline std::vector<GarageEntry> g_Garage;
     inline std::mutex               g_GarageMtx;
     inline int           g_ScreenWidth  = 1920;

@@ -6,6 +6,7 @@
 #include "globals.h"
 #include "features.h"
 #include "natives.h"
+#include "lua_exec.h"
 #include "imgui.h"
 
 #include <shellapi.h>
@@ -265,12 +266,13 @@ namespace C4pt0r::Menu
         { "Sul (Porto de LS)",          -505.4f, -2323.7f,  6.4f },
     };
 
+    static int s_SelPlayer = -1;   // alvo compartilhado: Jogadores + Lua
+
     // ---- JOGADORES: lista, acoes em outros players ----------------------
     static void TabPlayers()
     {
         SectionHeader("JOGADORES ONLINE");
 
-        static int s_SelPlayer = -1;
         // try_lock: nunca deixar a thread de render travar no mutex
         if (g_DataMutex.try_lock_for(std::chrono::milliseconds(10))) {
             ImGui::BeginChild("##plist", ImVec2(0, 150), ImGuiChildFlags_Border);
@@ -333,6 +335,56 @@ namespace C4pt0r::Menu
             Tooltip("Carrega o jogador no ombro, igual o H dos empregos. "
                     "Dispara evento de server; attach local so com controle.");
         }
+    }
+
+    // ---- LUA: executor dentro do ScRT — TriggerServerEvent de verdade ---
+    static void TabLua()
+    {
+        SectionHeader("LUA EXECUTOR");
+
+        ImGui::TextWrapped(
+            "Roda Lua num state real do FiveM — igual um resource da "
+            "cidade. Aqui o TriggerServerEvent chega no server de verdade "
+            "(a chamada via native CFX crashava).");
+        ImGui::TextDisabled("Estado: %s", LuaExec::Status());
+        if (!LuaExec::Ready()) {
+            ImGui::TextWrapped(
+                "Joga um tempo com o cheat injetado — o executor captura "
+                "o lua_State de um resource e fica pronto.");
+        }
+        ImGui::Spacing();
+
+        SectionHeader("ACOES SERVER-SIDE (alvo selecionado)");
+        if (s_SelPlayer < 0) {
+            ImGui::TextDisabled("Seleciona alguem na aba Jogadores primeiro.");
+        }
+        ImGui::BeginDisabled(s_SelPlayer < 0);
+        if (ImGui::Button("RESSUSCITAR (server)", ImVec2(ImGui::GetContentRegionAvail().x * 0.48f, 30))) {
+            g_Lua.preset = 1; g_Lua.targetId = s_SelPlayer;
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("CARREGAR (server)", ImVec2(-1, 30))) {
+            g_Lua.preset = 2; g_Lua.targetId = s_SelPlayer;
+        }
+        if (ImGui::Button("DAR GOD (server)", ImVec2(ImGui::GetContentRegionAvail().x * 0.48f, 30))) {
+            g_Lua.preset = 3; g_Lua.targetId = s_SelPlayer;
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("REVIVER EU", ImVec2(-1, 30))) {
+            g_Lua.preset = 4; g_Lua.targetId = -1;
+        }
+        ImGui::EndDisabled();
+        Tooltip("Cada botao dispara a bateria de eventos conhecidos de "
+                "scripts de medico/carry. Se a cidade usar um deles, "
+                "funciona de verdade pra todo mundo.");
+
+        SectionHeader("SCRIPT CUSTOM");
+        ImGui::InputTextMultiline("##luacode", g_Lua.code, sizeof(g_Lua.code),
+            ImVec2(-1, 140));
+        if (ImGui::Button("EXECUTAR", ImVec2(-1, 30)) && g_Lua.code[0])
+            g_Lua.run = true;
+        Tooltip("Ex: TriggerServerEvent('hospital:server:RevivePlayer', "
+                "GetPlayerServerId(12))");
     }
 
     // ---- Teleporte: waypoint, presets, coords, posicoes salvas -----------
@@ -819,6 +871,7 @@ namespace C4pt0r::Menu
         SideTab("Veiculo",   7, tabW);
         SideTab("Armas",     8, tabW);
         SideTab("Mundo",     4, tabW);
+        SideTab("Lua",       10, tabW);
         SideTab("Ferramentas", 5, tabW);
         SideTab("Settings",  6, tabW);
 
@@ -846,6 +899,7 @@ namespace C4pt0r::Menu
             case 7: TabVeiculo();  break;
             case 8: TabArmas();    break;
             case 9: TabPlayers();  break;
+            case 10: TabLua();     break;
         }
 
         ImGui::EndChild();
