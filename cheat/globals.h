@@ -140,6 +140,63 @@ namespace C4pt0r
         bool  boostVeh       = false;
     };
 
+    // ---------------------------------------------- Mecanico / tunagem
+    //  One-shot ops consumidas pelo TickMechanic: menu so escreve flags,
+    //  a feature thread aplica os natives (mesmo padrao das outras feats)
+    struct MechanicConfig {
+        bool  useNearest   = false;   // alvo = veiculo mais proximo (senao o seu)
+
+        bool  applyMods    = false;   // aplica sliders de performance/mods
+        bool  applyColors  = false;   // aplica cores/livrea
+        bool  applyExtras  = false;   // perolado/roda/fumaca/neon/vidro
+        bool  applyPower   = false;   // multiplicadores de motor/torque
+        bool  plate        = false;   // aplica texto da placa
+        char  plateText[16] = {};
+
+        // performance / mods (slot LSC) — -1 = nao aplicar
+        int   engine = -1;   // 11
+        int   brakes = -1;   // 12
+        int   trans  = -1;   // 13
+        int   susp   = -1;   // 15
+        int   armor  = -1;   // 16
+        int   horn   = -1;   // 14
+        int   wheels = -1;   // 23
+        int   wheelType = -1;
+        int   livery = -1;   // 48
+        bool  turbo   = false;
+        bool  xenon   = false;
+        bool  bpTires = false;   // pneus a prova de bala
+
+        // cores — -1 = nao aplicar
+        int   colPrim  = -1;
+        int   colSec   = -1;
+        int   pearl    = -1;
+        int   wheelCol = -1;
+        int   winTint  = -1;   // 0-6
+        bool  useCustomCol = false;
+        float primRgb[3] = { 1.00f, 0.23f, 0.23f };
+        float secRgb[3]  = { 0.12f, 0.12f, 0.12f };
+
+        // neon / fumaca
+        bool  neonOn   = false;
+        float neonRgb[3]  = { 0.00f, 0.83f, 1.00f };
+        float smokeRgb[3] = { 0.00f, 0.83f, 1.00f };
+
+        float engineMult = 0.f;   // >0 aplica
+        float torqueMult = 0.f;
+    };
+
+    // ---------------------------------------------- Armas
+    struct WeaponConfig {
+        bool  give        = false;
+        char  model[48]   = "weapon_carbinerifle";
+        int   ammo        = 250;
+        bool  attachments = false;   // tenta dar acessorios comuns junto
+        bool  giveAll     = false;
+        bool  stripAll    = false;
+        bool  refillAll   = false;
+    };
+
     struct MenuConfig {
         int  toggleKey    = VK_F9;
         bool isOpen       = true;
@@ -243,6 +300,8 @@ namespace C4pt0r
     inline std::timed_mutex g_DataMutex;
     inline VehicleConfig    g_Vehicle;
     inline FunConfig        g_Fun;
+    inline MechanicConfig   g_Mech;
+    inline WeaponConfig     g_Weapon;
     inline int           g_ScreenWidth  = 1920;
     inline int           g_ScreenHeight = 1080;
     // setado pelo MainThread quando o init de natives termina (ok ou nao) —

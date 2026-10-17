@@ -734,6 +734,205 @@ namespace C4pt0r::Features
         Log::Write("RestoreAll: estado do ped restaurado.");
     }
 
+    // ---- Mecanico (tunagem em qualquer lugar) ------------------------------
+    static int MechTargetVeh(int ped)
+    {
+        int veh = 0;
+        if (Natives::IsPedInAnyVehicle(ped))
+            veh = Natives::GetVehiclePedIsIn(ped);
+        if (!veh && g_Mech.useNearest) {
+            Vec3 p = Natives::GetEntityCoords(ped);
+            uint64_t a[6] = { FA(p.x), FA(p.y), FA(p.z), FA(25.f), 0, 70 };
+            uint64_t r[4] = {};
+            if (CN("GET_CLOSEST_VEHICLE", a, 6, r)) veh = (int)r[0];
+        }
+        return veh;
+    }
+
+    static void MechApplyMods(int veh)
+    {
+        uint64_t kit[2] = { (uint64_t)veh, 0 };
+        CN("SET_VEHICLE_MOD_KIT", kit, 2);          // obrigatorio antes de mods
+        if (g_Mech.wheelType >= 0) {                // wheel type vem antes das rodas
+            uint64_t a[2] = { (uint64_t)veh, (uint64_t)g_Mech.wheelType };
+            CN("SET_VEHICLE_WHEEL_TYPE", a, 2);
+        }
+        static const int kSlots[] = { 11, 12, 13, 15, 16, 14, 23, 24 };
+        const int vals[] = { g_Mech.engine, g_Mech.brakes, g_Mech.trans,
+                             g_Mech.susp,   g_Mech.armor,  g_Mech.horn,
+                             g_Mech.wheels, g_Mech.wheels };
+        for (int i = 0; i < 8; ++i) {
+            if (vals[i] < 0) continue;
+            uint64_t a[4] = { (uint64_t)veh, (uint64_t)kSlots[i], (uint64_t)vals[i], 0 };
+            CN("SET_VEHICLE_MOD", a, 4);
+        }
+        if (g_Mech.livery >= 0) {
+            uint64_t a[4] = { (uint64_t)veh, 48, (uint64_t)g_Mech.livery, 0 };
+            CN("SET_VEHICLE_MOD", a, 4);
+            uint64_t b[3] = { (uint64_t)veh, (uint64_t)g_Mech.livery, 0 };
+            CN("SET_VEHICLE_LIVERY", b, 3);         // builds antigos
+        }
+        { uint64_t a[3] = { (uint64_t)veh, 18, g_Mech.turbo ? 1ull : 0ull };
+          CN("TOGGLE_VEHICLE_MOD", a, 3); }
+        { uint64_t a[3] = { (uint64_t)veh, 22, g_Mech.xenon ? 1ull : 0ull };
+          CN("TOGGLE_VEHICLE_MOD", a, 3); }
+        { uint64_t a[2] = { (uint64_t)veh, g_Mech.bpTires ? 0ull : 1ull };
+          CN("SET_VEHICLE_TYRES_CAN_BURST", a, 2); }
+    }
+
+    static void MechApplyColors(int veh)
+    {
+        if (g_Mech.useCustomCol) {
+            auto c255 = [](float v) { return (uint64_t)(v * 255.f); };
+            uint64_t a[4] = { (uint64_t)veh, c255(g_Mech.primRgb[0]),
+                              c255(g_Mech.primRgb[1]), c255(g_Mech.primRgb[2]) };
+            CN("SET_VEHICLE_CUSTOM_PRIMARY_COLOUR", a, 4);
+            a[1] = c255(g_Mech.secRgb[0]); a[2] = c255(g_Mech.secRgb[1]);
+            a[3] = c255(g_Mech.secRgb[2]);
+            CN("SET_VEHICLE_CUSTOM_SECONDARY_COLOUR", a, 4);
+        }
+        else if (g_Mech.colPrim >= 0 || g_Mech.colSec >= 0) {
+            uint64_t a[3] = { (uint64_t)veh,
+                (uint64_t)(g_Mech.colPrim < 0 ? 0 : g_Mech.colPrim),
+                (uint64_t)(g_Mech.colSec  < 0 ? 0 : g_Mech.colSec) };
+            CN("SET_VEHICLE_COLOURS", a, 3);
+        }
+        if (g_Mech.pearl >= 0 || g_Mech.wheelCol >= 0) {
+            uint64_t a[3] = { (uint64_t)veh,
+                (uint64_t)(g_Mech.pearl    < 0 ? 0 : g_Mech.pearl),
+                (uint64_t)(g_Mech.wheelCol < 0 ? 0 : g_Mech.wheelCol) };
+            CN("SET_VEHICLE_EXTRA_COLOURS", a, 3);
+        }
+    }
+
+    static void MechApplyExtras(int veh)
+    {
+        auto c255 = [](float v) { return (uint64_t)(v * 255.f); };
+        for (int i = 0; i < 4; ++i) {
+            uint64_t a[3] = { (uint64_t)veh, (uint64_t)i,
+                              g_Mech.neonOn ? 1ull : 0ull };
+            CN("SET_VEHICLE_NEON_ENABLED", a, 3);
+        }
+        { uint64_t a[4] = { (uint64_t)veh, c255(g_Mech.neonRgb[0]),
+                            c255(g_Mech.neonRgb[1]), c255(g_Mech.neonRgb[2]) };
+          CN("SET_VEHICLE_NEON_COLOUR", a, 4); }
+        { uint64_t a[4] = { (uint64_t)veh, c255(g_Mech.smokeRgb[0]),
+                            c255(g_Mech.smokeRgb[1]), c255(g_Mech.smokeRgb[2]) };
+          CN("SET_VEHICLE_TYRE_SMOKE_COLOR", a, 4); }
+        if (g_Mech.winTint >= 0) {
+            uint64_t a[2] = { (uint64_t)veh, (uint64_t)g_Mech.winTint };
+            CN("SET_VEHICLE_WINDOW_TINT", a, 2);
+        }
+    }
+
+    static void TickMechanic()
+    {
+        bool any = g_Mech.applyMods | g_Mech.applyColors | g_Mech.applyExtras |
+                   g_Mech.applyPower | g_Mech.plate;
+        if (!any) return;
+        int ped = Natives::PlayerPedId();
+        int veh = ped ? MechTargetVeh(ped) : 0;
+        if (veh) {
+            if (g_Mech.applyMods)   MechApplyMods(veh);
+            if (g_Mech.applyColors) MechApplyColors(veh);
+            if (g_Mech.applyExtras) MechApplyExtras(veh);
+            if (g_Mech.applyPower) {
+                if (g_Mech.engineMult > 0.f) {
+                    uint64_t a[2] = { (uint64_t)veh, FA(g_Mech.engineMult) };
+                    CN("SET_VEHICLE_ENGINE_POWER_MULTIPLIER", a, 2);
+                }
+                if (g_Mech.torqueMult > 0.f) {
+                    uint64_t a[2] = { (uint64_t)veh, FA(g_Mech.torqueMult) };
+                    CN("SET_VEHICLE_ENGINE_TORQUE_MULTIPLIER", a, 2);
+                }
+            }
+            if (g_Mech.plate && g_Mech.plateText[0]) {
+                uint64_t a[2] = { (uint64_t)veh, (uint64_t)g_Mech.plateText };
+                CN("SET_VEHICLE_NUMBER_PLATE_TEXT", a, 2);
+            }
+        }
+        g_Mech.applyMods = g_Mech.applyColors = g_Mech.applyExtras = false;
+        g_Mech.applyPower = g_Mech.plate = false;
+    }
+
+    // ---- Armas -------------------------------------------------------------
+    static const char* kWeaponList[] = {
+        "weapon_pistol","weapon_combatpistol","weapon_appistol","weapon_pistol50",
+        "weapon_snspistol","weapon_heavypistol","weapon_vintagepistol",
+        "weapon_microsmg","weapon_smg","weapon_assaultsmg","weapon_machinepistol",
+        "weapon_minismg","weapon_combatpdw","weapon_mumpshotgun",
+        "weapon_assaultrifle","weapon_carbinerifle","weapon_advancedrifle",
+        "weapon_specialcarbine","weapon_bullpuprifle","weapon_compactrifle",
+        "weapon_mg","weapon_combatmg","weapon_gusenberg",
+        "weapon_pumpshotgun","weapon_sawnoffshotgun","weapon_assaultshotgun",
+        "weapon_bullpupshotgun","weapon_musket","weapon_heavyshotgun",
+        "weapon_dbshotgun","weapon_autoshotgun",
+        "weapon_sniperrifle","weapon_heavysniper","weapon_marksmanrifle",
+        "weapon_grenadelauncher","weapon_rpg","weapon_hominglauncher",
+        "weapon_minigun","weapon_railgun","weapon_firework",
+        "weapon_grenade","weapon_stickybomb","weapon_molotov","weapon_proxmine",
+        "weapon_knife","weapon_bat","weapon_crowbar","weapon_nightstick",
+        "weapon_machete","weapon_battleaxe","weapon_switchblade",
+        "weapon_petrolcan","weapon_parachute","weapon_flare","weapon_flashlight",
+        "weapon_stungun","weapon_fireextinguisher"
+    };
+
+    static const char* kWeaponComps[] = {
+        "component_at_scope_small","component_at_scope_medium",
+        "component_at_scope_large","component_at_scope_macro",
+        "component_at_scope_max","component_at_scope_nightvision",
+        "component_at_ar_supp","component_at_ar_supp_02",
+        "component_at_pi_supp","component_at_pi_supp_02",
+        "component_at_sr_supp","component_at_sr_supp_03",
+        "component_at_ar_afgrip","component_at_ar_afgrip_02",
+        "component_at_pi_flsh","component_at_ar_flsh",
+        "component_extended_clip","component_luxury_finish"
+    };
+
+    static void GiveOneWeapon(int ped, const char* model, int ammo)
+    {
+        uint64_t a[5] = { (uint64_t)ped, (uint64_t)Natives::JoaatHash(model),
+                          (uint64_t)ammo, 0, 1 };
+        if (CN("GIVE_WEAPON_TO_PED", a, 5))
+            Log::Write("arma: %s (muni %d)", model, ammo);
+    }
+
+    static void TickWeapons()
+    {
+        if (!(g_Weapon.give | g_Weapon.giveAll | g_Weapon.stripAll |
+              g_Weapon.refillAll)) return;
+        int ped = Natives::PlayerPedId();
+        if (ped) {
+            if (g_Weapon.stripAll) {
+                uint64_t a[2] = { (uint64_t)ped, 1 };
+                CN("REMOVE_ALL_PED_WEAPONS", a, 2);
+            }
+            if (g_Weapon.give && g_Weapon.model[0]) {
+                GiveOneWeapon(ped, g_Weapon.model, g_Weapon.ammo);
+                if (g_Weapon.attachments) {
+                    uint32_t wh = Natives::JoaatHash(g_Weapon.model);
+                    for (const char* comp : kWeaponComps) {
+                        uint64_t a[3] = { (uint64_t)ped, wh,
+                                          (uint64_t)Natives::JoaatHash(comp) };
+                        CN("GIVE_WEAPON_COMPONENT_TO_PED", a, 3);
+                    }
+                }
+            }
+            if (g_Weapon.giveAll) {
+                for (const char* w : kWeaponList) GiveOneWeapon(ped, w, 9999);
+            }
+            if (g_Weapon.refillAll) {
+                for (const char* w : kWeaponList) {
+                    uint64_t a[3] = { (uint64_t)ped,
+                        (uint64_t)Natives::JoaatHash(w), 9999 };
+                    CN("SET_PED_AMMO", a, 3);
+                }
+            }
+        }
+        g_Weapon.give = g_Weapon.giveAll = false;
+        g_Weapon.stripAll = g_Weapon.refillAll = false;
+    }
+
     // ---- Player data collection (throttled — feeds ESP + player list) ----
     //  Always runs so the player list works even with ESP off. WorldToScreen
     //  is only paid for when ESP is actually enabled.
@@ -1094,6 +1293,8 @@ namespace C4pt0r::Features
         Natives::g_TickStage = 11; TickAimbot();
         Natives::g_TickStage = 12; TickInspector();
         Natives::g_TickStage = 13; TickFarm();
+        Natives::g_TickStage = 14; TickMechanic();
+        Natives::g_TickStage = 15; TickWeapons();
         Natives::g_TickStage = 0;
     }
 

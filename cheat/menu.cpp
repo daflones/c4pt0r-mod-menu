@@ -458,6 +458,149 @@ namespace C4pt0r::Menu
         if (ImGui::Button("TURBO +35 m/s", ImVec2(-1, 30)))      g_Fun.boostVeh = true;
     }
 
+    // ---- Veiculo: mecanico completo em qualquer lugar ---------------------
+    static void TabVeiculo()
+    {
+        SectionHeader("ALVO");
+        ImGui::Checkbox("Veiculo mais proximo (em vez do que estou dentro)",
+                        &g_Mech.useNearest);
+        ImGui::TextDisabled("Busca num raio de 25m. -1 = nao alterar.");
+
+        SectionHeader("PERFORMANCE");
+        ImGui::SliderInt("Motor",        &g_Mech.engine, -1, 4);
+        ImGui::SliderInt("Freios",       &g_Mech.brakes, -1, 3);
+        ImGui::SliderInt("Cambio",       &g_Mech.trans,  -1, 3);
+        ImGui::SliderInt("Suspensao",    &g_Mech.susp,   -1, 4);
+        ImGui::SliderInt("Blindagem",    &g_Mech.armor,  -1, 4);
+        ImGui::Checkbox("Turbo",  &g_Mech.turbo);
+        ImGui::SameLine();
+        ImGui::Checkbox("Xenon",  &g_Mech.xenon);
+        ImGui::SameLine();
+        ImGui::Checkbox("Pneus a prova de bala", &g_Mech.bpTires);
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.00f, 0.55f, 0.30f, 0.80f));
+        if (ImGui::Button("MAX PERFORMANCE", ImVec2(-1, 32))) {
+            g_Mech.engine = 4; g_Mech.brakes = 3; g_Mech.trans = 3;
+            g_Mech.susp   = 4; g_Mech.armor  = 4; g_Mech.turbo = true;
+            g_Mech.applyMods = true;
+        }
+        ImGui::PopStyleColor();
+        if (ImGui::Button("Aplicar performance/mods", ImVec2(-1, 30)))
+            g_Mech.applyMods = true;
+
+        SectionHeader("RODAS / MODS");
+        static const char* wheelTypes[] = {
+            "Sport","Muscle","Lowrider","SUV","Offroad","Tuner",
+            "Bike","High End","Benny's","Bespoke","F1"
+        };
+        ImGui::Combo("Tipo de roda", &g_Mech.wheelType, wheelTypes,
+                     IM_ARRAYSIZE(wheelTypes));
+        ImGui::SliderInt("Roda (indice)", &g_Mech.wheels, -1, 50);
+        ImGui::SliderInt("Buzina",        &g_Mech.horn,   -1, 51);
+        Tooltip("Indice da buzina: 0-5 stock, 6-10 caminhao, 11+ musical etc.");
+        ImGui::SliderInt("Adesivo/livery", &g_Mech.livery, -1, 5);
+
+        SectionHeader("CORES");
+        ImGui::Checkbox("Cor personalizada (RGB)", &g_Mech.useCustomCol);
+        if (g_Mech.useCustomCol) {
+            ImGui::ColorEdit3("Primaria",   g_Mech.primRgb);
+            ImGui::ColorEdit3("Secundaria", g_Mech.secRgb);
+        } else {
+            ImGui::SliderInt("Cor primaria",   &g_Mech.colPrim, -1, 160);
+            ImGui::SliderInt("Cor secundaria", &g_Mech.colSec,  -1, 160);
+        }
+        ImGui::SliderInt("Perolado",  &g_Mech.pearl,    -1, 160);
+        ImGui::SliderInt("Cor roda",  &g_Mech.wheelCol, -1, 160);
+        if (ImGui::Button("Aplicar cores", ImVec2(-1, 30)))
+            g_Mech.applyColors = true;
+
+        SectionHeader("NEON / VIDRO / FUMACA");
+        ImGui::Checkbox("Neon ligado", &g_Mech.neonOn);
+        ImGui::ColorEdit3("Cor neon",       g_Mech.neonRgb);
+        ImGui::ColorEdit3("Fumaca pneus",   g_Mech.smokeRgb);
+        ImGui::SliderInt("Vidro fume", &g_Mech.winTint, -1, 6);
+        Tooltip("0 nenhum, 1 preto puro, 2 escuro, 3 claro, 4 stock, 5 limo, 6 verde.");
+        if (ImGui::Button("Aplicar extras", ImVec2(-1, 30)))
+            g_Mech.applyExtras = true;
+
+        SectionHeader("POTENCIA EXTRA");
+        ImGui::SliderFloat("Motor (multiplicador)",  &g_Mech.engineMult, 0.f, 50.f, "%.1fx");
+        ImGui::SliderFloat("Torque (multiplicador)", &g_Mech.torqueMult, 0.f, 50.f, "%.1fx");
+        ImGui::TextDisabled("0 = nao aplicar.");
+        if (ImGui::Button("Aplicar potencia", ImVec2(-1, 30)))
+            g_Mech.applyPower = true;
+
+        SectionHeader("PLACA");
+        ImGui::InputText("Texto da placa", g_Mech.plateText,
+                         sizeof(g_Mech.plateText));
+        if (ImGui::Button("Aplicar placa", ImVec2(-1, 30)))
+            g_Mech.plate = true;
+
+        SectionHeader("ACOES RAPIDAS");
+        if (ImGui::Button("Consertar / limpar", ImVec2(-1, 30))) g_Fun.repairVeh = true;
+        if (ImGui::Button("Virar pra cima",     ImVec2(-1, 30))) g_Fun.flipVeh = true;
+        if (ImGui::Button("TURBO +35 m/s",      ImVec2(-1, 30))) g_Fun.boostVeh = true;
+    }
+
+    // ---- Armas -------------------------------------------------------------
+    static const char* kWeaponNames[] = {
+        "Carabina","Rifle de assalto","Carabina especial","Rifle avancado",
+        "Pistola","Pistola de combate","Pistola AP","Pistola .50",
+        "Micro SMG","SMG","SMG de assalto","Pistola automatica",
+        "Rifle MK2 (musket)","Metralhadora","MG de combate","Tommy gun",
+        "Escopeta","Cano serrado","Escopeta de assalto","Escopeta pesada",
+        "Sniper","Sniper pesada","Rifle de precisao",
+        "Lanca-granadas","RPG","Lancador teleguiado","Minigun","Railgun",
+        "Lanca-fogos","Granada","Bomba adesiva","Molotov","Mina proximidade",
+        "Faca","Taco","Pe de cabra","Cassetete","Taser","Extintor",
+        "Paraquedas","Sinalizador","Lanterna","Galao de gasolina"
+    };
+    static const char* kWeaponModels[] = {
+        "weapon_carbinerifle","weapon_assaultrifle","weapon_specialcarbine",
+        "weapon_advancedrifle","weapon_pistol","weapon_combatpistol",
+        "weapon_appistol","weapon_pistol50","weapon_microsmg","weapon_smg",
+        "weapon_assaultsmg","weapon_machinepistol","weapon_musket","weapon_mg",
+        "weapon_combatmg","weapon_gusenberg","weapon_pumpshotgun",
+        "weapon_sawnoffshotgun","weapon_assaultshotgun","weapon_heavyshotgun",
+        "weapon_sniperrifle","weapon_heavysniper","weapon_marksmanrifle",
+        "weapon_grenadelauncher","weapon_rpg","weapon_hominglauncher",
+        "weapon_minigun","weapon_railgun","weapon_firework","weapon_grenade",
+        "weapon_stickybomb","weapon_molotov","weapon_proxmine","weapon_knife",
+        "weapon_bat","weapon_crowbar","weapon_nightstick","weapon_stungun",
+        "weapon_fireextinguisher","weapon_parachute","weapon_flare",
+        "weapon_flashlight","weapon_petrolcan"
+    };
+
+    static void TabArmas()
+    {
+        SectionHeader("DAR ARMA");
+        static int s_WIdx = 0;
+        ImGui::Combo("Arma", &s_WIdx, kWeaponNames, IM_ARRAYSIZE(kWeaponNames));
+        ImGui::InputText("Modelo custom", g_Weapon.model,
+                         sizeof(g_Weapon.model));
+        Tooltip("Modelo da arma, ex: weapon_carbinerifle. O combo acima preenche ao dar.");
+        ImGui::SliderInt("Municao", &g_Weapon.ammo, 0, 9999);
+        ImGui::Checkbox("Com acessorios (mira, silenciador...)", &g_Weapon.attachments);
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.00f, 0.55f, 0.30f, 0.80f));
+        if (ImGui::Button("DAR ARMA", ImVec2(-1, 34))) {
+            strncpy_s(g_Weapon.model, kWeaponModels[s_WIdx],
+                      sizeof(g_Weapon.model) - 1);
+            g_Weapon.give = true;
+        }
+        ImGui::PopStyleColor();
+        Tooltip("Da a arma selecionada no combo. Pra modelo custom, clica depois de editar o campo.");
+
+        SectionHeader("ARSENAL");
+        if (ImGui::Button("DAR TODAS AS ARMAS", ImVec2(-1, 32)))
+            g_Weapon.giveAll = true;
+        if (ImGui::Button("Municao cheia em tudo", ImVec2(-1, 30)))
+            g_Weapon.refillAll = true;
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.70f, 0.20f, 0.20f, 0.80f));
+        if (ImGui::Button("Remover todas as armas", ImVec2(-1, 30)))
+            g_Weapon.stripAll = true;
+        ImGui::PopStyleColor();
+        ImGui::TextDisabled("Dica: liga 'municao infinita' na aba Player pra nunca recarregar.");
+    }
+
     static void TabTools()
     {
         SectionHeader("INSPECTOR AO VIVO");
@@ -611,6 +754,8 @@ namespace C4pt0r::Menu
         SideTab("Visuals",   1, tabW);
         SideTab("Player",    2, tabW);
         SideTab("Teleport",  3, tabW);
+        SideTab("Veiculo",   7, tabW);
+        SideTab("Armas",     8, tabW);
         SideTab("Mundo",     4, tabW);
         SideTab("Ferramentas", 5, tabW);
         SideTab("Settings",  6, tabW);
@@ -636,6 +781,8 @@ namespace C4pt0r::Menu
             case 4: TabMundo();    break;
             case 5: TabTools();    break;
             case 6: TabSettings(); break;
+            case 7: TabVeiculo();  break;
+            case 8: TabArmas();    break;
         }
 
         ImGui::EndChild();
