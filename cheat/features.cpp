@@ -28,6 +28,8 @@ constexpr float DEG2RAD = PI / 180.0f;
 
 namespace C4pt0r::Features
 {
+    static uint64_t FA(float f);   // fwd — definida junto do CN() mais abaixo
+
     // ====================================================================
     //  Tick — called from main thread, safe to use natives
     // ====================================================================
@@ -155,7 +157,9 @@ namespace C4pt0r::Features
     static bool  s_TpBusy   = false;
     static int   s_TpEnt    = 0;
     static Vec3  s_TpTarget{};
+    static Vec3  s_TpStart{};
     static int   s_TpTries  = 0;
+    static int   s_TpProbe  = 0;   // shape test handle (plano B do ground Z)
 
     static void SceneLoad(float x, float y, float z) {
         uint64_t a[5];
@@ -170,16 +174,49 @@ namespace C4pt0r::Features
         Natives::CallByName("NEW_LOAD_SCENE_STOP", nullptr, 0, nullptr);
     }
 
+    // ---- Shape test: raycast pra baixo quando GET_GROUND_Z nao resolve ----
+    static int StartShapeTest(float x, float y, float zTop, float zBot) {
+        uint64_t a[9];
+        a[0] = FA(x); a[1] = FA(y); a[2] = FA(zTop);
+        a[3] = FA(x); a[4] = FA(y); a[5] = FA(zBot);
+        a[6] = 1 | 16;              // world + peds-as-blocking flags
+        a[7] = 0;                   // ignore entity
+        a[8] = 7;
+        uint64_t r[4] = {};
+        if (Natives::CallByName("START_EXPENSIVE_SYNCHRONOUS_SHAPE_TEST_LOS_PROBE",
+                                a, 9, r) && r[0])
+            return static_cast<int>(r[0]);
+        return 0;
+    }
+    // retorna 2 quando terminou (outZ valido se hit), 0 esperando, -1 erro
+    static int ReadShapeTest(int handle, float& outZ, bool& hit) {
+        float ec[4] = {}, norm[4] = {};
+        uint64_t ent = 0, didHit = 0;
+        uint64_t a[5];
+        a[0] = static_cast<uint64_t>(handle);
+        a[1] = reinterpret_cast<uint64_t>(&didHit);
+        a[2] = reinterpret_cast<uint64_t>(ec);
+        a[3] = reinterpret_cast<uint64_t>(norm);
+        a[4] = reinterpret_cast<uint64_t>(&ent);
+        uint64_t r[4] = {};
+        if (!Natives::CallByName("GET_SHAPE_TEST_RESULT", a, 5, r)) return -1;
+        if (r[0] == 2) { hit = didHit != 0; if (hit) outZ = ec[2]; return 2; }
+        if (r[0] == 0) return 0;
+        return -1;
+    }
+
     static void BeginTeleport(int ped, float x, float y, float z) {
         if (s_TpBusy) return;
         int veh = Natives::IsPedInAnyVehicle(ped) ? Natives::GetVehiclePedIsIn(ped) : 0;
         s_TpEnt = veh ? veh : ped;
+        s_TpStart = Natives::GetEntityCoords(s_TpEnt);   // ponto de retorno seguro
         Natives::FreezeEntityPosition(s_TpEnt, true);
         // park 400m above the destination — collision starts streaming below us
         Natives::SetEntityCoordsNoOffset(s_TpEnt, x, y, z + 400.f);
         SceneLoad(x, y, z);
         s_TpTarget = { x, y, z };
         s_TpTries  = 0;
+        s_TpProbe  = 0;
         s_TpBusy   = true;
         Log::Write("TP: voando para %.1f, %.1f (carregando area...)", x, y);
     }
@@ -202,20 +239,46 @@ namespace C4pt0r::Features
         // --- staged TP in flight: probe ground until it resolves ---
         if (s_TpBusy) {
             float gz = 0;
-            if (Natives::GetGroundZ(s_TpTarget.x, s_TpTarget.y, s_TpTarget.z + 300.f, gz)) {
+            bool got = Natives::GetGroundZ(s_TpTarget.x, s_TpTarget.y,
+                                           s_TpTarget.z + 300.f, gz);
+
+            // plano B: raycast pra baixo (GET_GROUND_Z nao existe nesse build)
+            if (!got) {
+                ++s_TpTries;
+                if (!s_TpProbe && s_TpTries > 20) {
+                    s_TpProbe = StartShapeTest(s_TpTarget.x, s_TpTarget.y,
+                                               s_TpTarget.z + 500.f,
+                                               s_TpTarget.z - 300.f);
+                }
+                if (s_TpProbe) {
+                    bool hit = false;
+                    int st = ReadShapeTest(s_TpProbe, gz, hit);
+                    if (st == 2) {
+                        if (hit) got = true;
+                        else s_TpProbe = 0;      // terminou sem hit — tenta outro depois
+                    } else if (st < 0) {
+                        s_TpProbe = 0;           // handle invalido — desiste
+                    }
+                }
+            }
+
+            if (got) {
                 Natives::SetEntityCoordsNoOffset(s_TpEnt, s_TpTarget.x, s_TpTarget.y, gz + 0.5f);
                 Natives::FreezeEntityPosition(s_TpEnt, false);
                 SceneStop();
                 s_TpBusy = false;
+                s_TpProbe = 0;
                 Log::Write("TP: pousou em %.1f, %.1f, %.1f",
                            s_TpTarget.x, s_TpTarget.y, gz);
-            } else if (++s_TpTries > 300) {   // ~5s waiting for stream
-                Natives::SetEntityCoordsNoOffset(s_TpEnt, s_TpTarget.x, s_TpTarget.y,
-                                                 s_TpTarget.z + 1.f);
+            } else if (s_TpTries > 500) {   // ~8s — NUNCA pousa no Z bruto
+                // (foi o que crashava: cair no void). volta pro ponto seguro.
+                Natives::SetEntityCoordsNoOffset(s_TpEnt, s_TpStart.x, s_TpStart.y,
+                                                 s_TpStart.z + 0.5f);
                 Natives::FreezeEntityPosition(s_TpEnt, false);
                 SceneStop();
                 s_TpBusy = false;
-                Log::Write("TP: ground Z nao resolveu, usando Z bruto.");
+                s_TpProbe = 0;
+                Log::Write("TP: ground Z indisponivel — abortado, voltou pro inicio.");
             }
         }
 

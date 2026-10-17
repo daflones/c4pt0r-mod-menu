@@ -146,11 +146,15 @@ namespace C4pt0r::Natives
         MaybeReResolve();
         bool anyHandler = false;
 
-        // Path B: exported scrEngine::GetNativeHandler -> call raw handler
+        // Path B: exported scrEngine::GetNativeHandler -> call raw handler.
+        // O fastPathMap e indexado pelo hash CURRENT-BUILD — natives
+        // rehasheados neste build ("no handler" fantasmas) precisam do
+        // MapNative antes do lookup, igual o path C ja fazia.
         if (s_RageGNH && !s_BanB) {
             g_InvokePath = 2;
             NativeHandler h = nullptr;
-            __try { h = s_RageGNH(hash); }
+            uint64_t bh = s_MapNative ? s_MapNative(hash) : hash;
+            __try { h = s_RageGNH(bh); }
             __except (EXCEPTION_EXECUTE_HANDLER) { h = nullptr; }
             if (h && Memory::IsExecutable(reinterpret_cast<uintptr_t>(h))) {
                 anyHandler = true;
