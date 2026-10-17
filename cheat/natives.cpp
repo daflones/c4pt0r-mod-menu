@@ -827,8 +827,79 @@ namespace C4pt0r::Natives
     }
 
     // ---- Generic by-name invocation ---------------------------------------
-    //  joaat: the hash GTA scripts use for native names — lets us call any
-    //  native without hardcoding its (possibly wrong) build-specific hash.
+    //  GTA5 natives tem hash64 PUBLICO fixo (NativeDB) — NAO e derivavel
+    //  do nome. O joaat32 do nome so e valido pra natives CFX do FiveM
+    //  (ex: TRIGGER_SERVER_EVENT_INTERNAL = 0x7FDD1128). CallByName:
+    //  tabela primeiro (GTA5), joaat32 como fallback (CFX).
+    static const struct { const char* name; uint64_t hash; } kNativeHashes[] = {
+        { "ADD_EXPLOSION",                       0xE3AD2BDBAEE269ACULL },
+        { "ATTACH_ENTITY_TO_ENTITY",             0x6B9BBD38AB0796DFULL },
+        { "CLEAR_OVERRIDE_WEATHER",              0x338D2E3477711050ULL },
+        { "CLEAR_PED_SECONDARY_TASK",            0x176CECF6F920D707ULL },
+        { "CLEAR_PLAYER_WANTED_LEVEL",           0xB302540597885499ULL },
+        { "CLONE_PED",                           0xEF29A16337FACADBULL },
+        { "CREATE_PED",                          0xD49F9B0955C367DEULL },
+        { "DETACH_ENTITY",                       0x961AC54BF0613F5DULL },
+        { "DOES_ENTITY_EXIST",                   0x7239B21A38F536BAULL },
+        { "GET_CLOSEST_VEHICLE",                 0xF73EB622C4F1689BULL },
+        { "GET_ENTITY_MODEL",                    0x9F47B058362C84B5ULL },
+        { "GET_PED_BONE_INDEX",                  0x3F428D08BE5AAE31ULL },
+        { "GET_PLAYER_GROUP",                    0x0D127585F77030AFULL },
+        { "GET_PLAYER_INVINCIBLE",               0xB721981B2B939E07ULL },
+        { "GET_VEHICLE_COLOURS",                 0xA19435F193E081ACULL },
+        { "GET_VEHICLE_CUSTOM_PRIMARY_COLOUR",   0xB64CF2CCA9D95F52ULL },
+        { "GET_VEHICLE_CUSTOM_SECONDARY_COLOUR", 0x8389CD56CA8072DCULL },
+        { "GIVE_WEAPON_COMPONENT_TO_PED",        0xD966D51AA5B28BB9ULL },
+        { "GIVE_WEAPON_TO_PED",                  0xBF0FD6E56C964FCBULL },
+        { "MODIFY_WATER",                        0xC443FD757C3BA637ULL },
+        { "NETWORK_HAS_CONTROL_OF_ENTITY",       0x01BF60A500E28887ULL },
+        { "NETWORK_REQUEST_CONTROL_OF_ENTITY",   0xB69317BF5E782347ULL },
+        { "PAUSE_CLOCK",                         0x4055E40BD2DBEC1DULL },
+        { "REMOVE_ALL_PED_WEAPONS",              0xF25DF915FA38C5F3ULL },
+        { "REQUEST_ANIM_DICT",                   0xD3BD40951412FEF6ULL },
+        { "SET_CLOCK_TIME",                      0x47C3B5848C3E45D8ULL },
+        { "SET_ENTITY_INVINCIBLE",               0x3882114BDE571AD4ULL },
+        { "SET_ENTITY_PROOFS",                   0xFAEE099C6F890BB8ULL },
+        { "SET_EVERYONE_IGNORE_PLAYER",          0x8EEDA153AD141BA4ULL },
+        { "SET_GRAVITY_LEVEL",                   0x740E14FAD5842351ULL },
+        { "SET_NIGHTVISION",                     0x18F621F7A5B1F85DULL },
+        { "SET_OVERRIDE_WEATHER",                0xA43D5C6FE51ADBEFULL },
+        { "SET_PED_AMMO",                        0x14E56BC5B5DB6A19ULL },
+        { "SET_PED_AS_GROUP_MEMBER",             0x9F3480FE65DB31B5ULL },
+        { "SET_PED_CAN_RAGDOLL",                 0xB128377056A54E2AULL },
+        { "SET_PED_IS_DRUNK",                    0x95D2D383D5396B8AULL },
+        { "SET_POLICE_IGNORE_PLAYER",            0x32C62AA929C2DA6AULL },
+        { "SET_SEETHROUGH",                      0x7E08924259E08CE0ULL },
+        { "SET_SUPER_JUMP_THIS_FRAME",           0x57FFF03E423A4C0BULL },
+        { "SET_TIME_SCALE",                      0x1D408577D440E81EULL },
+        { "SET_VEHICLE_COLOURS",                 0x4F1D4BE3A7F24601ULL },
+        { "SET_VEHICLE_CUSTOM_PRIMARY_COLOUR",   0x7141766F91D15BEAULL },
+        { "SET_VEHICLE_CUSTOM_SECONDARY_COLOUR", 0x36CED73BFED89754ULL },
+        { "SET_VEHICLE_DIRT_LEVEL",              0x79D3B596FE44EE8BULL },
+        { "MODIFY_VEHICLE_TOP_SPEED",            0x93A3996368C94158ULL },
+        { "SET_VEHICLE_EXTRA_COLOURS",           0x2036F561ADD12E33ULL },
+        { "SET_VEHICLE_FIXED",                   0x115722B1B9C14C1CULL },
+        { "SET_VEHICLE_FORWARD_SPEED",           0xAB54A438726D25D5ULL },
+        { "SET_VEHICLE_LIVERY",                  0x60BF608F1B8CD1B6ULL },
+        { "SET_VEHICLE_MOD",                     0x6AF0636DDEDCB6DDULL },
+        { "SET_VEHICLE_MOD_KIT",                 0x1F2AA07F00B3217AULL },
+        { "SET_VEHICLE_NEON_COLOUR",             0x8E0A582209A62695ULL },
+        { "SET_VEHICLE_NEON_ENABLED",            0x2AA720E4287BF269ULL },
+        { "SET_VEHICLE_NUMBER_PLATE_TEXT",       0x95A88F0B409CDA47ULL },
+        { "SET_VEHICLE_TYRE_SMOKE_COLOR",        0xB5BA80F839791C0FULL },
+        { "SET_VEHICLE_TYRES_CAN_BURST",         0xEB9DC3C7D8596C46ULL },
+        { "SET_VEHICLE_WHEEL_TYPE",              0x487EB21CC7295BA1ULL },
+        { "SET_VEHICLE_WINDOW_TINT",             0x57C51E6BAD752696ULL },
+        { "SHAKE_GAMEPLAY_CAM",                  0xFD55E49555E017CFULL },
+        { "START_SCRIPT_FIRE",                   0x6B83617E04503888ULL },
+        { "TASK_COMBAT_PED",                     0xF166E48407BAC484ULL },
+        { "TASK_PLAY_ANIM",                      0xEA47FE3719165B94ULL },
+        { "TOGGLE_VEHICLE_MOD",                  0x2A1F4F37F95BAD08ULL },
+        // aliases — nomes que o menu usa mas que no NativeDB tem outro nome
+        { "SET_VEHICLE_ENGINE_POWER_MULTIPLIER", 0x93A3996368C94158ULL },  // = MODIFY_VEHICLE_TOP_SPEED
+        { "SET_VEHICLE_ENGINE_TORQUE_MULTIPLIER",0xB59E4BD043AE6E61ULL },  // legacy SP
+    };
+
     uint32_t JoaatHash(const char* s) {
         uint32_t h = 0;
         for (; *s; ++s) {
@@ -844,13 +915,20 @@ namespace C4pt0r::Natives
         return h;
     }
 
+    static uint64_t HashForName(const char* name)
+    {
+        for (const auto& e : kNativeHashes)
+            if (_stricmp(e.name, name) == 0) return e.hash;
+        return JoaatHash(name);   // natives CFX do FiveM = joaat32 do nome
+    }
+
     bool CallByName(const char* name, const uint64_t* args, int argCount, uint64_t* ret) {
         if (!name || !*name) return false;
-        return CallNative(JoaatHash(name), args, argCount, ret);
+        return CallNative(HashForName(name), args, argCount, ret);
     }
 
     bool HasNative(const char* name) {
         if (!name || !*name) return false;
-        return GetHandler(JoaatHash(name)) != nullptr;
+        return GetHandler(HashForName(name)) != nullptr;
     }
 }
