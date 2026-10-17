@@ -315,6 +315,9 @@ namespace C4pt0r::Menu
         Tooltip("Trazer o jogador pra perto de voce (efeito local).");
 
         SectionHeader("ACOES");
+        ImGui::Checkbox("Eventos de server (experimental)", &g_PActions.serverEvents);
+        Tooltip("Dispara TriggerServerEvent pros recursos de medico/carry. "
+                "SE CRASHAR O JOGO, e esse native que mata — deixa desligado.");
         if (ImGui::Button("DAR GOD", ImVec2(ImGui::GetContentRegionAvail().x * 0.48f, 30)))
             g_PActions.giveGodId = s_SelPlayer;
         ImGui::SameLine();

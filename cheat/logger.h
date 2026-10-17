@@ -101,6 +101,10 @@ namespace C4pt0r::Log
         WriteFile(h, line, n, &w, nullptr);
         FlushFileBuffers(h);
         CloseHandle(h);
+        // o writer async usa g_Offset proprio — sem isso, a proxima linha
+        // normal sobrescreve o STEP que acabou de sair (apagava os logs
+        // de diagnostico do crash no arquivo final).
+        InterlockedAdd64((volatile LONG64*)&g_Offset.QuadPart, n);
     }
 
     inline void Close() {

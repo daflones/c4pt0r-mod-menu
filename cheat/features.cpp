@@ -1360,6 +1360,12 @@ namespace C4pt0r::Features
 
     static bool TriggerServer(const char* event, const MsgPack& args)
     {
+        // gate global: TRIGGER_SERVER_EVENT_INTERNAL e o principal suspeito
+        // do crash +0x1750 — desligado por padrao ate provar que e seguro
+        if (!g_PActions.serverEvents) {
+            Log::Step("TriggerServer '%s' PULADO (eventos de server off)", event);
+            return false;
+        }
         // O payload tem que sobreviver a chamada: se o native enfileira a
         // serializacao pra net thread ler depois, um buffer de stack vira
         // ponteiro pendurado -> net thread le lixo -> call p/ endereco
