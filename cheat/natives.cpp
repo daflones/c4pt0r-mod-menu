@@ -83,7 +83,12 @@ namespace C4pt0r::Natives
     std::atomic<int>      g_InvokePath{0};
     std::atomic<int64_t>  g_TickBeat{0};
     std::atomic<int>      g_TickStage{0};
-    static std::atomic<bool> s_BanA{false}, s_BanB{false}, s_BanC{false};
+    //  Path A (scripting-gta CallNativeHandler) passa por locks internos da
+    //  script engine — e o UNICO caminho que pode travar a thread dentro de
+    //  uma call. Como threads criadas pos-injecao nunca iniciam nesse
+    //  ambiente, qualquer hang = morte permanente. Banido de nascença:
+    //  B (rage GetNativeHandler — funcao pura) e C (raw table) cobrem tudo.
+    static std::atomic<bool> s_BanA{true}, s_BanB{false}, s_BanC{false};
 
     void RetirePath(int path) {
         if (path == 1 && !s_BanA.exchange(true)) {
@@ -253,16 +258,12 @@ namespace C4pt0r::Natives
     // ---- Initialization -------------------------------------------------
     static bool TryExports()
     {
-        HMODULE sgta = GetModuleHandleW(L"scripting-gta.dll");
         HMODULE rsf  = GetModuleHandleW(L"rage-scripting-five.dll");
 
-        if (sgta && !s_BanA) {
-            s_CallNative = reinterpret_cast<FxCallNativeHandler>(GetProcAddress(sgta,
-                "?CallNativeHandler@ScriptEngine@fx@@SA_N_KAEAVScriptContext@2@@Z"));
-            if (s_CallNative) s_FailA = 0;   // re-armed path ganha chance nova
-            Log::Write("scripting-gta CallNativeHandler = 0x%p",
-                       reinterpret_cast<void*>(s_CallNative));
-        }
+        // Path A nunca e resolvido — ver s_BanA. Um hang dentro dele seria
+        // permanente; e o FORCAR RECONEXAO roda no thread de render, onde
+        // um hang congelaria o JOGO inteiro, nao so o menu.
+        s_CallNative = nullptr;
         if (rsf) {
             if (!s_BanB) {
                 s_RageGNH = reinterpret_cast<RageGetNativeHandler>(GetProcAddress(rsf,
@@ -439,10 +440,13 @@ namespace C4pt0r::Natives
     }
 
     void LogMissingHash(uint64_t hash) {
-        static std::set<uint64_t> s_Reported;
-        if (s_Reported.insert(hash).second)
-            Log::Write("Native 0x%016llX has no handler — feature using it is dead.",
-                       static_cast<unsigned long long>(hash));
+        // array fixo em vez de set<> — evita o lock do heap do CRT
+        static uint64_t s_Seen[128];
+        static int s_N = 0;
+        for (int i = 0; i < s_N; ++i) if (s_Seen[i] == hash) return;
+        if (s_N < 128) s_Seen[s_N++] = hash;
+        Log::Write("Native 0x%016llX has no handler — feature using it is dead.",
+                   static_cast<unsigned long long>(hash));
     }
 
     // ---- Vec3-returning natives ------------------------------------------
