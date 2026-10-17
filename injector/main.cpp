@@ -80,16 +80,42 @@ static bool CreateDeviceD3D(HWND hWnd) {
 enum Screen { SCR_LOGIN, SCR_SIGNUP, SCR_MAIN, SCR_PAY };
 enum StatKind { ST_NEUTRO, ST_OK, ST_ERR, ST_GOLD };
 
+struct Variant {
+    std::string id, label, bonus;
+    int price_cents = 0, discount_cents = 0;
+    int duration_minutes = -1;   // -1 = vitalicio
+    int finalPrice() const {
+        int f = price_cents - discount_cents;
+        return f < 1 ? 1 : f;
+    }
+    std::string durLabel() const {
+        if (duration_minutes < 0) return "vitalicio";
+        if (duration_minutes < 60) return std::to_string(duration_minutes) + "min";
+        if (duration_minutes % 1440 == 0)
+            return duration_minutes == 1440 ? "24 horas"
+                : std::to_string(duration_minutes / 1440) + " dias";
+        return std::to_string(duration_minutes / 60) + " horas";
+    }
+};
+
 struct Product {
-    std::string slug, name, desc, dllPath;
+    std::string id, slug, name, desc, dllPath;
     int price_cents = 0, duration_days = 0;   // 0 = vitalicio
     std::vector<std::string> features;
+    std::vector<Variant> variants;
     bool isExe() const {
         return dllPath.size() > 4 &&
             dllPath.compare(dllPath.size() - 4, 4, ".exe") == 0;
     }
+    // menor preco final entre variantes (0 se nao tem variante)
+    int minPrice() const {
+        if (variants.empty()) return price_cents;
+        int m = variants[0].finalPrice();
+        for (auto& v : variants) if (v.finalPrice() < m) m = v.finalPrice();
+        return m;
+    }
 };
-struct LicInfo { bool active = false; std::string expires; };
+struct LicInfo { bool active = false; std::string expires, variant; };
 
 static struct {
     std::atomic<int>     screen{SCR_LOGIN};
@@ -253,12 +279,13 @@ static bool DoRefresh(const std::string& rt) {
 }
 
 static void FetchProducts() {
-    auto r = RestGet("/rest/v1/products?select=slug,name,description,price_cents,duration_days,dll_path,features&active=eq.true&order=price_cents.asc");
+    auto r = RestGet("/rest/v1/products?select=id,slug,name,description,price_cents,duration_days,dll_path,features&active=eq.true&order=price_cents.asc");
     auto j = JsonParse(r.body);
     if (j.type != Json::Arr) return;
     std::vector<Product> out;
     for (auto& p : j.a) {
         Product pr;
+        pr.id = p["id"].str();
         pr.slug = p["slug"].str();
         pr.name = p["name"].str();
         pr.desc = p["description"].str();
@@ -268,6 +295,23 @@ static void FetchProducts() {
         for (auto& f : p["features"].a) pr.features.push_back(f.str());
         if (pr.slug.empty()) continue;
         out.push_back(pr);
+    }
+    // variantes (planos) agrupadas por produto
+    auto rv = RestGet("/rest/v1/product_variants?select=id,product_id,label,price_cents,discount_cents,duration_minutes,bonus_label&active=eq.true&order=sort.asc,price_cents.asc");
+    auto jv = JsonParse(rv.body);
+    if (jv.type == Json::Arr) {
+        for (auto& vv : jv.a) {
+            Variant v;
+            v.id = vv["id"].str();
+            v.label = vv["label"].str();
+            v.bonus = vv["bonus_label"].str();
+            v.price_cents = (int)vv["price_cents"].n;
+            v.discount_cents = (int)vv["discount_cents"].n;
+            v.duration_minutes = vv["duration_minutes"].type == Json::Num
+                ? (int)vv["duration_minutes"].n : -1;
+            std::string pid = vv["product_id"].str();
+            for (auto& p : out) if (p.id == pid) p.variants.push_back(v);
+        }
     }
     std::lock_guard<std::mutex> l(g.mtx);
     g.products = out;
@@ -288,6 +332,7 @@ static bool CheckLicense(const std::string& slug, bool bindHwid, std::string* ou
         LicInfo li;
         li.active = l["status"].str() == "active";
         li.expires = l["expires_at"].str();
+        li.variant = l["variant_label"].str();
         m[l["slug"].str()] = li;
     }
     {
@@ -438,9 +483,11 @@ static void ThreadRefreshLicenses() {
     g.busy = false;
 }
 
-static void ThreadBuyPix(std::string slug) {
+static void ThreadBuyPix(std::string slug, std::string variantId) {
     g.busy = true;
-    std::string body = "{\"product_slug\":\"" + slug + "\",\"method\":\"pix\"}";
+    std::string body = "{\"product_slug\":\"" + slug + "\",\"method\":\"pix\"";
+    if (!variantId.empty()) body += ",\"variant_id\":\"" + variantId + "\"";
+    body += "}";
     auto r = FnCall("checkout", body, g.accessToken);
     auto j = JsonParse(r.body);
     if (j["ok"].truthy() && !j["qr_code"].str().empty()) {
@@ -767,8 +814,15 @@ static void ScreenSignup() {
     StatusArea();
 }
 
+static std::string Brl(int cents) {
+    char b[32];
+    snprintf(b, 32, "R$ %.2f", cents / 100.0f);
+    for (char* c = b; *c; c++) if (*c == '.') *c = ',';
+    return b;
+}
+
 // card de produto no catalogo
-static void ProductCard(const Product& p, const LicInfo& lic, bool anyLicense) {
+static void ProductCard(const Product& p, const LicInfo& lic) {
     ImGui::PushID(p.slug.c_str());
     ImGui::PushStyleColor(ImGuiCol_ChildBg, COL_CARD2);
     ImGui::BeginChild("##pcard", ImVec2(0, 0), ImGuiChildFlags_Border | ImGuiChildFlags_AutoResizeY);
@@ -777,15 +831,15 @@ static void ProductCard(const Product& p, const LicInfo& lic, bool anyLicense) {
     ImGui::PushFont(F_Med);
     ImGui::TextColored(COL_TEXT, "%s", p.name.c_str());
     ImGui::PopFont();
-    ImGui::SameLine(ImGui::GetContentRegionAvail().x - 90);
+    ImGui::SameLine(ImGui::GetContentRegionAvail().x - 110);
     ImGui::PushFont(F_Med);
-    ImGui::TextColored(COL_ACCENT, "R$ %.2f", p.price_cents / 100.0f);
+    if (!p.variants.empty())
+        ImGui::TextColored(COL_ACCENT, "a partir de %s", Brl(p.minPrice()).c_str());
+    else
+        ImGui::TextColored(COL_ACCENT, "%s", Brl(p.price_cents).c_str());
     ImGui::PopFont();
 
     ImGui::PushFont(F_Sm);
-    ImGui::TextColored(COL_DIM, "%s",
-        p.duration_days > 0 ?
-        (std::to_string(p.duration_days) + " dias de acesso").c_str() : "Acesso vitalicio");
     if (!p.desc.empty()) ImGui::TextColored(COL_DIM, "%s", p.desc.c_str());
     ImGui::PopFont();
 
@@ -814,10 +868,47 @@ static void ProductCard(const Product& p, const LicInfo& lic, bool anyLicense) {
             }
         }
     } else {
-        std::string lbl = "COMPRAR — R$ " + std::to_string(p.price_cents / 100) + "," +
-            std::to_string(p.price_cents % 100).insert(0, p.price_cents % 100 < 10 ? "0" : "");
+        // seletor de plano (variante)
+        static std::map<std::string, int> sel;
+        int& cur = sel[p.slug];
+        if (cur >= (int)p.variants.size()) cur = 0;
+
+        if (!p.variants.empty()) {
+            ImGui::PushFont(F_Sm);
+            ImGui::TextColored(COL_DIM, "ESCOLHA O PLANO");
+            ImGui::PopFont();
+
+            // combo com preco final + desconto + brinde
+            const Variant& cur_v = p.variants[cur];
+            std::string curLbl = cur_v.label + "  —  " + Brl(cur_v.finalPrice());
+            if (cur_v.discount_cents > 0)
+                curLbl += "  (de " + Brl(cur_v.price_cents) + ")";
+            ImGui::SetNextItemWidth(-1);
+            if (ImGui::BeginCombo("##variant", curLbl.c_str())) {
+                for (int i = 0; i < (int)p.variants.size(); i++) {
+                    const Variant& v = p.variants[i];
+                    std::string lbl = v.label + "  —  " + Brl(v.finalPrice());
+                    if (v.discount_cents > 0)
+                        lbl += "  (de " + Brl(v.price_cents) + ")";
+                    if (!v.bonus.empty()) lbl += "  +BRINDE";
+                    if (ImGui::Selectable(lbl.c_str(), i == cur)) cur = i;
+                    if (i == cur) ImGui::SetItemDefaultFocus();
+                }
+                ImGui::EndCombo();
+            }
+            ImGui::PushFont(F_Sm);
+            ImGui::TextColored(COL_DIM, "%s de acesso", cur_v.durLabel().c_str());
+            if (!cur_v.bonus.empty())
+                ImGui::TextColored(COL_GOLD, "BRINDE: %s", cur_v.bonus.c_str());
+            ImGui::PopFont();
+        }
+
+        const Variant* v = p.variants.empty() ? nullptr : &p.variants[cur];
+        int price = v ? v->finalPrice() : p.price_cents;
+        std::string lbl = "COMPRAR — " + Brl(price);
         if (PrimaryBtn(lbl.c_str(), -1, 40)) {
-            if (!g.busy) std::thread(ThreadBuyPix, p.slug).detach();
+            if (!g.busy)
+                std::thread(ThreadBuyPix, p.slug, v ? v->id : std::string()).detach();
         }
     }
     ImGui::EndChild();
@@ -841,8 +932,15 @@ static void ScreenMain() {
     ImGui::PushFont(F_Sm); ImGui::TextColored(COL_DIM, "SUA CONTA"); ImGui::PopFont();
 
     if (anyLic) {
+        std::string planShow = g.planName;
+        {
+            std::lock_guard<std::mutex> l(g.mtx);
+            auto it = g.licenses.find(planSlug);
+            if (it != g.licenses.end() && !it->second.variant.empty())
+                planShow += " — " + it->second.variant;
+        }
         ImGui::PushFont(F_Big);
-        ImGui::TextColored(COL_TEXT, "%s", g.planName.empty() ? "Licenca ativa" : g.planName.c_str());
+        ImGui::TextColored(COL_TEXT, "%s", planShow.empty() ? "Licenca ativa" : planShow.c_str());
         ImGui::PopFont();
         ImGui::SameLine();
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.10f, 0.55f, 0.30f, 0.90f));
@@ -884,7 +982,7 @@ static void ScreenMain() {
     }
     for (auto& p : prods) {
         LicInfo li = lics.count(p.slug) ? lics[p.slug] : LicInfo{};
-        ProductCard(p, li, anyLic);
+        ProductCard(p, li);
     }
     ImGui::EndChild();
 
