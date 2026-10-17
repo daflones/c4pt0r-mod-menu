@@ -166,7 +166,7 @@ static void MainThread(HMODULE hModule)
                     consecutiveErrors = 0;
                     Natives::MarkUnhealthy();
                     Log::Write("Features pausadas por excecoes — restaurando ped e agendando re-init.");
-                    __try { Features::RestoreAll(); }
+                    __try { Features::RestoreEntity(); }   // mantem toggles do user
                     __except (EXCEPTION_EXECUTE_HANDLER) {}
                 }
             }
@@ -188,7 +188,7 @@ static void MainThread(HMODULE hModule)
                         Natives::MarkUnhealthy();
                         Log::Write("Watchdog: natives pararam de responder "
                                    "sem excecao — re-init agendado.");
-                        __try { Features::RestoreAll(); }
+                        __try { Features::RestoreEntity(); }
                         __except (EXCEPTION_EXECUTE_HANDLER) {}
                     }
                 } else {

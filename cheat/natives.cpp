@@ -78,9 +78,12 @@ namespace C4pt0r::Natives
 
     // SEH-safe invocation — catch(...) does NOT trap access violations and
     // an AV inside a native handler is what silently killed the cheat loop.
-    static bool InvokePathA(uint64_t hash, FxScriptContext& ctx) {
+    // 'threw' distinguishes "native returned false / not found" (normal)
+    // from "the call itself faulted" (path is actually dying).
+    static bool InvokePathA(uint64_t hash, FxScriptContext& ctx, bool& threw) {
+        threw = false;
         __try { return s_CallNative(hash, &ctx); }
-        __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+        __except (EXCEPTION_EXECUTE_HANDLER) { threw = true; return false; }
     }
     static bool InvokeHandler(NativeHandler h, NativeCallContext& ctx) {
         __try { h(&ctx); return true; }
@@ -107,6 +110,7 @@ namespace C4pt0r::Natives
                     uint64_t* ret)
     {
         MaybeReResolve();
+        bool anyHandler = false;
 
         // Path A: FiveM's exported high-level invoke (does everything)
         if (s_CallNative) {
@@ -114,7 +118,8 @@ namespace C4pt0r::Natives
             ctx.Reset();
             for (int i = 0; i < nargs; ++i) ctx.args[i] = args[i];
             ctx.numArgs = nargs;
-            bool ok = InvokePathA(hash, ctx);
+            bool threw = false;
+            bool ok = InvokePathA(hash, ctx, threw);
             if (ok) {
                 s_FailA = 0;
                 ++s_OkCount; s_LastOkMs = NowMs();
@@ -126,12 +131,12 @@ namespace C4pt0r::Natives
                 }
                 return true;
             }
-            // returned false = native blocked/missing — the raw paths may
-            // still resolve it; SEH faults inside get counted so a dead
-            // path is retired instead of killing the whole loop
-            if (++s_FailA == PATH_FAIL_LIMIT) {
+            // false sem fault = native recusado/ausente — NAO penaliza o
+            // path (foi isso que aposentava os paths por natives faltando).
+            // So conta quando a chamada em si explode (SEH).
+            if (threw && ++s_FailA >= PATH_FAIL_LIMIT) {
                 s_CallNative = nullptr;
-                Log::Write("CallNativeHandler path died (%d fails) — dropping to rage path.", s_FailA);
+                Log::Write("CallNativeHandler path died (%d faults) — dropping to rage path.", s_FailA);
             }
         }
 
@@ -141,6 +146,7 @@ namespace C4pt0r::Natives
             __try { h = s_RageGNH(hash); }
             __except (EXCEPTION_EXECUTE_HANDLER) { h = nullptr; }
             if (h && Memory::IsExecutable(reinterpret_cast<uintptr_t>(h))) {
+                anyHandler = true;
                 NativeCallContext ctx;
                 for (int i = 0; i < nargs; ++i) ctx.Push(args[i]);
                 if (InvokeHandler(h, ctx)) {
@@ -153,11 +159,14 @@ namespace C4pt0r::Natives
                     }
                     return true;
                 }
+                // handler existia mas explodiu — falha real do path
+                if (++s_FailB >= PATH_FAIL_LIMIT) {
+                    s_RageGNH = nullptr;
+                    Log::Write("rage GetNativeHandler path died (%d faults) — dropping to raw table.", s_FailB);
+                }
             }
-            if (++s_FailB == PATH_FAIL_LIMIT) {
-                s_RageGNH = nullptr;
-                Log::Write("rage GetNativeHandler path died (%d fails) — dropping to raw table.", s_FailB);
-            }
+            // h == nullptr -> native nao registrado nesse build: normal,
+            // nao conta contra a saude do path
         }
 
         // Path C: raw table walk (mapped hash, raw handler — likely
@@ -168,6 +177,7 @@ namespace C4pt0r::Natives
             __try { h = s_GetNativeHandler(s_NativeTable, h2); }
             __except (EXCEPTION_EXECUTE_HANDLER) { h = nullptr; }
             if (h && Memory::IsExecutable(reinterpret_cast<uintptr_t>(h))) {
+                anyHandler = true;
                 NativeCallContext ctx;
                 for (int i = 0; i < nargs; ++i) ctx.Push(args[i]);
                 if (InvokeHandler(h, ctx)) {
@@ -180,14 +190,15 @@ namespace C4pt0r::Natives
                     }
                     return true;
                 }
-            }
-            if (++s_FailC == PATH_FAIL_LIMIT) {
-                s_GetNativeHandler = nullptr;
-                Log::Write("Raw table path died (%d fails) — no native paths left.", s_FailC);
+                if (++s_FailC >= PATH_FAIL_LIMIT) {
+                    s_GetNativeHandler = nullptr;
+                    Log::Write("Raw table path died (%d faults) — no native paths left.", s_FailC);
+                }
             }
         }
 
         ++s_FailCount;
+        if (!anyHandler) LogMissingHash(hash);   // diagnostico: native nao existe
         return false;
     }
 
@@ -200,6 +211,7 @@ namespace C4pt0r::Natives
         if (sgta) {
             s_CallNative = reinterpret_cast<FxCallNativeHandler>(GetProcAddress(sgta,
                 "?CallNativeHandler@ScriptEngine@fx@@SA_N_KAEAVScriptContext@2@@Z"));
+            if (s_CallNative) s_FailA = 0;   // re-armed path ganha chance nova
             Log::Write("scripting-gta CallNativeHandler = 0x%p",
                        reinterpret_cast<void*>(s_CallNative));
         }
@@ -207,6 +219,7 @@ namespace C4pt0r::Natives
             s_RageGNH = reinterpret_cast<RageGetNativeHandler>(GetProcAddress(rsf,
                 "?GetNativeHandler@scrEngine@rage@@SAP6AXPEAVscrNativeCallContext@2@@Z_K@Z"));
             s_MapNative = reinterpret_cast<MapNativeFn>(GetProcAddress(rsf, "MapNative"));
+            if (s_RageGNH) s_FailB = 0;
             Log::Write("rage-scr-five GetNativeHandler = 0x%p  MapNative = 0x%p",
                        reinterpret_cast<void*>(s_RageGNH),
                        reinterpret_cast<void*>(s_MapNative));
@@ -256,6 +269,7 @@ namespace C4pt0r::Natives
         }
         s_GetNativeHandler = reinterpret_cast<GetNativeHandlerFn>(
             Memory::ResolveRIP(callAt, 1, 5));
+        s_FailC = 0;
 
         uintptr_t body = Memory::PatternScanModule(nullptr, bodyPat);
         Log::Write("NativeTable=0x%p  Resolver=0x%p  body@0x%p",

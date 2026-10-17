@@ -592,9 +592,31 @@ namespace C4pt0r::Features
         }
     }
 
+    // ---- RestoreEntity: devolve o ped ao normal SEM limpar os toggles ----
+    //  Usada pelo watchdog/recovery: se os natives voltarem, as features
+    //  que o usuario ligou re-aplicam sozinhas no proximo tick.
+    void RestoreEntity()
+    {
+        int ped = Natives::PlayerPedId();
+        int player = Natives::PlayerId();
+        __try {
+            if (ped) {
+                Natives::SetEntityVisible(ped, true, false);
+                Natives::SetEntityCollision(ped, true, true);
+                Natives::SetEntityHasGravity(ped, true);
+                Natives::SetEntityVelocity(ped, 0.f, 0.f, 0.f);
+                Natives::SetEntityInvincible(ped, false);
+                Natives::FreezeEntityPosition(ped, false);
+            }
+            if (player) Natives::SetRunSprintMultiplier(player, 1.0f);
+            if (s_TpBusy && s_TpEnt) { Natives::FreezeEntityPosition(s_TpEnt, false); s_TpBusy = false; SceneStop(); }
+            uint64_t one[] = { FA(1.f) };
+            CN("SET_TIME_SCALE", one, 1);
+        } __except (EXCEPTION_EXECUTE_HANDLER) {}
+    }
+
     // ---- RestoreAll: devolve o ped ao estado normal ----------------------
-    //  Chamada no unload, quando o sistema de natives cai e pelo botao
-    //  "Restaurar tudo" — evita ficar preso invisivel/sem colisao.
+    //  Chamada no unload e pelo botao "Restaurar tudo" — zera tudo.
     void RestoreAll()
     {
         int ped = Natives::PlayerPedId();
