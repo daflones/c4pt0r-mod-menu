@@ -18,6 +18,7 @@
 #include <cmath>
 #include <algorithm>
 #include <chrono>
+#include <cstdlib>
 
 // Math helpers
 constexpr float PI = 3.14159265358979f;
@@ -142,18 +143,44 @@ namespace C4pt0r::Features
         }
     }
 
-    // ---- Teleport -------------------------------------------------------
-    // Pending waypoint state: TP requires a ground-Z probe which is async —
-    // we retry a few ticks before giving up and using raw waypoint Z.
-    static Vec3 s_PendingTp{};
-    static bool s_HasPendingTp = false;
-    static int  s_GroundTries  = 0;
+    // ---- Safe staged teleport --------------------------------------------
+    //  Teleporting far away used to crash: the destination's collision wasn't
+    //  streamed, GET_GROUND_Z failed, we landed on raw Z and fell into the
+    //  void. Now:
+    //    1) freeze ped/vehicle, move it 400m above the target, start loading
+    //       the scene there (streams collision for the ground probe)
+    //    2) poll GET_GROUND_Z each tick
+    //    3) land on real ground (or raw Z after ~5s), unfreeze, stop scene load
+    static bool  s_TpBusy   = false;
+    static int   s_TpEnt    = 0;
+    static Vec3  s_TpTarget{};
+    static int   s_TpTries  = 0;
 
-    static void DoTeleport(int ped, float x, float y, float z) {
-        // tp the vehicle too if we're inside one — otherwise we get ejected
+    static void SceneLoad(float x, float y, float z) {
+        uint64_t a[5];
+        *reinterpret_cast<float*>(&a[0]) = x;
+        *reinterpret_cast<float*>(&a[1]) = y;
+        *reinterpret_cast<float*>(&a[2]) = z;
+        *reinterpret_cast<float*>(&a[3]) = 350.f;
+        a[4] = 0;
+        Natives::CallByName("NEW_LOAD_SCENE_START_SPHERE", a, 5, nullptr);
+    }
+    static void SceneStop() {
+        Natives::CallByName("NEW_LOAD_SCENE_STOP", nullptr, 0, nullptr);
+    }
+
+    static void BeginTeleport(int ped, float x, float y, float z) {
+        if (s_TpBusy) return;
         int veh = Natives::IsPedInAnyVehicle(ped) ? Natives::GetVehiclePedIsIn(ped) : 0;
-        if (veh) Natives::SetEntityCoordsNoOffset(veh, x, y, z + 0.5f);
-        else     Natives::SetEntityCoordsNoOffset(ped, x, y, z + 0.5f);
+        s_TpEnt = veh ? veh : ped;
+        Natives::FreezeEntityPosition(s_TpEnt, true);
+        // park 400m above the destination — collision starts streaming below us
+        Natives::SetEntityCoordsNoOffset(s_TpEnt, x, y, z + 400.f);
+        SceneLoad(x, y, z);
+        s_TpTarget = { x, y, z };
+        s_TpTries  = 0;
+        s_TpBusy   = true;
+        Log::Write("TP: voando para %.1f, %.1f (carregando area...)", x, y);
     }
 
     static void TickTeleport()
@@ -171,17 +198,23 @@ namespace C4pt0r::Features
             g_Teleport.savedZ = pos.z;
         }
 
-        // --- pending waypoint TP: keep probing ground Z a few ticks ---
-        if (s_HasPendingTp) {
+        // --- staged TP in flight: probe ground until it resolves ---
+        if (s_TpBusy) {
             float gz = 0;
-            if (Natives::GetGroundZ(s_PendingTp.x, s_PendingTp.y, s_PendingTp.z + 300.f, gz)) {
-                DoTeleport(ped, s_PendingTp.x, s_PendingTp.y, gz);
-                s_HasPendingTp = false;
-            } else if (++s_GroundTries > 12) {
-                // ground never resolved — land on the raw coords anyway
-                DoTeleport(ped, s_PendingTp.x, s_PendingTp.y, s_PendingTp.z + 1.f);
-                s_HasPendingTp = false;
-                Log::Write("TP waypoint: ground Z nao resolveu, usando Z bruto.");
+            if (Natives::GetGroundZ(s_TpTarget.x, s_TpTarget.y, s_TpTarget.z + 300.f, gz)) {
+                Natives::SetEntityCoordsNoOffset(s_TpEnt, s_TpTarget.x, s_TpTarget.y, gz + 0.5f);
+                Natives::FreezeEntityPosition(s_TpEnt, false);
+                SceneStop();
+                s_TpBusy = false;
+                Log::Write("TP: pousou em %.1f, %.1f, %.1f",
+                           s_TpTarget.x, s_TpTarget.y, gz);
+            } else if (++s_TpTries > 300) {   // ~5s waiting for stream
+                Natives::SetEntityCoordsNoOffset(s_TpEnt, s_TpTarget.x, s_TpTarget.y,
+                                                 s_TpTarget.z + 1.f);
+                Natives::FreezeEntityPosition(s_TpEnt, false);
+                SceneStop();
+                s_TpBusy = false;
+                Log::Write("TP: ground Z nao resolveu, usando Z bruto.");
             }
         }
 
@@ -192,9 +225,7 @@ namespace C4pt0r::Features
             if (wp.x == 0.f && wp.y == 0.f && Natives::IsWaypointActive())
                 wp = Natives::GetWaypointCoords();
             if (wp.x != 0.f || wp.y != 0.f) {
-                s_PendingTp   = wp;
-                s_HasPendingTp = true;
-                s_GroundTries = 0;
+                BeginTeleport(ped, wp.x, wp.y, wp.z);
             } else {
                 Log::Write("TP waypoint: nenhum waypoint marcado no mapa.");
             }
@@ -203,19 +234,14 @@ namespace C4pt0r::Features
         // TP to saved
         if (g_Teleport.toSaved) {
             g_Teleport.toSaved = false;
-            if (g_Teleport.hasSaved) {
-                DoTeleport(ped, g_Teleport.savedX, g_Teleport.savedY, g_Teleport.savedZ);
-            }
+            if (g_Teleport.hasSaved)
+                BeginTeleport(ped, g_Teleport.savedX, g_Teleport.savedY, g_Teleport.savedZ);
         }
 
-        // TP to explicit coords
+        // TP to explicit coords / presets
         if (g_Teleport.toCoords) {
             g_Teleport.toCoords = false;
-            float gz = 0;
-            if (Natives::GetGroundZ(g_Teleport.tx, g_Teleport.ty, g_Teleport.tz + 300.f, gz))
-                DoTeleport(ped, g_Teleport.tx, g_Teleport.ty, gz);
-            else
-                DoTeleport(ped, g_Teleport.tx, g_Teleport.ty, g_Teleport.tz);
+            BeginTeleport(ped, g_Teleport.tx, g_Teleport.ty, g_Teleport.tz);
         }
 
         // TP to player id
@@ -225,7 +251,7 @@ namespace C4pt0r::Features
             int tped = Natives::GetPlayerPed(target);
             if (tped) {
                 Vec3 p = Natives::GetEntityCoords(tped);
-                DoTeleport(ped, p.x + 1.5f, p.y, p.z);
+                BeginTeleport(ped, p.x + 1.5f, p.y, p.z);
             } else {
                 Log::Write("TP player: id %d sem ped.", target);
             }
@@ -297,6 +323,275 @@ namespace C4pt0r::Features
         s_VStage = VStage::Idle;
     }
 
+    // ---- Fun / world features ---------------------------------------------
+    //  All natives invoked by name (joaat at runtime) — a native that doesn't
+    //  exist on this build just returns false, nothing crashes.
+    static bool CN(const char* n, const uint64_t* a = nullptr, int c = 0,
+                   uint64_t* r = nullptr) {
+        return Natives::CallByName(n, a, c, r);
+    }
+    static uint64_t FA(float f) {          // float arg packed into u64 slot
+        uint64_t u = 0;
+        *reinterpret_cast<float*>(&u) = f;
+        return u;
+    }
+
+    // ---- Ped/animal spawn (request model -> wait -> create) ---------------
+    enum class PStage { Idle, Loading };
+    static PStage   s_PStage  = PStage::Idle;
+    static uint32_t s_PModel  = 0;
+    static int      s_PTries  = 0;
+    static int      s_PigLeft = 0;      // pigs left to drop from the sky
+    static bool     s_PigMode = false;  // current spawn is a falling pig
+
+    static void TickFun()
+    {
+        int ped    = Natives::PlayerPedId();
+        int player = Natives::PlayerId();
+        if (!ped) return;
+        Vec3 pos = Natives::GetEntityCoords(ped);
+
+        // ---------------- toggles ----------------
+        if (g_Fun.superJump) {
+            uint64_t a[] = { static_cast<uint64_t>(player) };
+            CN("SET_SUPER_JUMP_THIS_FRAME", a, 1);
+        }
+        if (g_Fun.noWanted) {
+            uint64_t a[] = { static_cast<uint64_t>(player) };
+            CN("CLEAR_PLAYER_WANTED_LEVEL", a, 1);
+        }
+        if (g_Fun.thermal) {
+            uint64_t a[] = { 1 };
+            CN("SET_SEETHROUGH", a, 1);
+        }
+        if (g_Fun.nightvision) {
+            uint64_t a[] = { 1 };
+            CN("SET_NIGHTVISION", a, 1);
+        }
+
+        // edge-applied persistent toggles
+        static bool s_Pol = false, s_Ev = false, s_Pause = false, s_Drunk = false;
+        if (g_Fun.policeIgnore != s_Pol) {
+            s_Pol = g_Fun.policeIgnore;
+            uint64_t a[] = { static_cast<uint64_t>(player), s_Pol ? 1ull : 0ull };
+            CN("SET_POLICE_IGNORE_PLAYER", a, 2);
+        }
+        if (g_Fun.everyoneIgnore != s_Ev) {
+            s_Ev = g_Fun.everyoneIgnore;
+            uint64_t a[] = { static_cast<uint64_t>(player), s_Ev ? 1ull : 0ull };
+            CN("SET_EVERYONE_IGNORE_PLAYER", a, 2);
+        }
+        if (g_Fun.pauseTime != s_Pause) {
+            s_Pause = g_Fun.pauseTime;
+            uint64_t a[] = { s_Pause ? 1ull : 0ull };
+            CN("PAUSE_CLOCK", a, 1);
+        }
+        if (g_Fun.drunk != s_Drunk) {
+            s_Drunk = g_Fun.drunk;
+            uint64_t a[] = { static_cast<uint64_t>(ped), s_Drunk ? 1ull : 0ull };
+            CN("SET_PED_IS_DRUNK", a, 2);
+        }
+        if (g_Fun.drunk) {   // keep the cam wobbling while drunk
+            static auto lastShake = std::chrono::steady_clock::time_point{};
+            auto now = std::chrono::steady_clock::now();
+            if (now - lastShake > std::chrono::milliseconds(600)) {
+                lastShake = now;
+                const char* shake = "DRUNK_SHAKE";
+                uint64_t a[] = { reinterpret_cast<uint64_t>(shake), FA(1.2f) };
+                CN("SHAKE_GAMEPLAY_CAM", a, 2);
+            }
+        }
+
+        static float s_LastScale = -1.f;
+        float want = g_Fun.slowmo ? g_Fun.timeScale : 1.f;
+        if (want != s_LastScale) {
+            uint64_t a[] = { FA(want) };
+            if (CN("SET_TIME_SCALE", a, 1)) s_LastScale = want;
+        }
+
+        // ---------------- one-shot world ----------------
+        if (g_Fun.setWeather) {
+            g_Fun.setWeather = false;
+            static const char* wnames[] = {
+                "CLEAR","EXTRASUNNY","CLOUDS","OVERCAST","RAIN","THUNDER",
+                "CLEARING","FOGGY","SMOG","XMAS","SNOWLIGHT","BLIZZARD"
+            };
+            const char* w = wnames[g_Fun.weather % 12];
+            uint64_t a[] = { reinterpret_cast<uint64_t>(w) };
+            if (CN("SET_OVERRIDE_WEATHER", a, 1))
+                Log::Write("Clima: %s", w);
+        }
+        if (g_Fun.clearWeather) {
+            g_Fun.clearWeather = false;
+            CN("CLEAR_OVERRIDE_WEATHER");
+        }
+        if (g_Fun.setClock) {
+            g_Fun.setClock = false;
+            uint64_t a[] = { static_cast<uint64_t>(g_Fun.clockH),
+                             static_cast<uint64_t>(g_Fun.clockM), 0 };
+            CN("SET_CLOCK_TIME", a, 3);
+        }
+        if (g_Fun.setGravity) {
+            g_Fun.setGravity = false;
+            uint64_t a[] = { static_cast<uint64_t>(g_Fun.gravity) };
+            CN("SET_GRAVITY_LEVEL", a, 1);
+        }
+
+        // ---------------- chaos ----------------
+        if (g_Fun.explode) {
+            g_Fun.explode = false;
+            float rad = Natives::GetEntityHeading(ped) * DEG2RAD;
+            uint64_t a[8];
+            a[0] = FA(pos.x - sinf(rad) * 6.f);
+            a[1] = FA(pos.y + cosf(rad) * 6.f);
+            a[2] = FA(pos.z);
+            a[3] = 0;               // grenade
+            a[4] = FA(1.f);         // damage scale
+            a[5] = 1;               // audible
+            a[6] = 0;               // visible
+            a[7] = FA(0.8f);        // cam shake
+            CN("ADD_EXPLOSION", a, 8);
+        }
+        if (g_Fun.fire) {
+            g_Fun.fire = false;
+            float rad = Natives::GetEntityHeading(ped) * DEG2RAD;
+            uint64_t a[5];
+            a[0] = FA(pos.x - sinf(rad) * 3.f);
+            a[1] = FA(pos.y + cosf(rad) * 3.f);
+            a[2] = FA(pos.z);
+            a[3] = 25;              // max children
+            a[4] = 0;               // not a gas fire
+            CN("START_SCRIPT_FIRE", a, 5);
+        }
+        if (g_Fun.water) {
+            g_Fun.water = false;
+            uint64_t a[4];
+            a[0] = FA(pos.x); a[1] = FA(pos.y);
+            a[2] = FA(pos.z + 3.f); a[3] = FA(150.f);
+            if (CN("MODIFY_WATER", a, 4))
+                Log::Write("Agua do mar spawnada (raio 150m, z+3).");
+            else
+                Log::Write("Agua: MODIFY_WATER indisponivel neste build.");
+        }
+        if (g_Fun.clone) {
+            g_Fun.clone = false;
+            uint64_t a[] = { static_cast<uint64_t>(ped) };
+            uint64_t r[4] = {};
+            CN("CLONE_PED", a, 1, r);
+            Log::Write(r[0] ? "Clone criado." : "Clone falhou.");
+        }
+        if (g_Fun.pigRain) {
+            g_Fun.pigRain = false;
+            s_PigLeft = 12;
+            Log::Write("Chuva de porcos chegando...");
+        }
+        if (s_PigLeft > 0 && s_PStage == PStage::Idle) {
+            --s_PigLeft;
+            s_PModel  = Natives::GetHashKey("a_c_pig");
+            s_PigMode = true;
+            s_PTries  = 0;
+            Natives::RequestModel(s_PModel);
+            s_PStage  = PStage::Loading;
+        }
+
+        // ---------------- ped / animal spawning ----------------
+        if (g_Fun.spawnPed) {
+            g_Fun.spawnPed = false;
+            const char* mdl = g_Fun.pedModel[0] ? g_Fun.pedModel : "a_m_y_hipster_01";
+            uint32_t m = Natives::GetHashKey(mdl);
+            if (!m) {
+                Log::Write("Ped: modelo '%s' invalido.", mdl);
+            } else {
+                s_PModel  = m;
+                s_PigMode = false;
+                s_PTries  = 0;
+                Natives::RequestModel(m);
+                s_PStage  = PStage::Loading;
+            }
+        }
+        if (s_PStage == PStage::Loading) {
+            if (++s_PTries > 120) {
+                s_PStage = PStage::Idle;
+                s_PigLeft = 0;
+                Log::Write("Ped: modelo 0x%X nao carregou.", s_PModel);
+            } else if (Natives::HasModelLoaded(s_PModel)) {
+                Vec3 at;
+                if (s_PigMode) {   // drop it from the sky
+                    at = { pos.x + static_cast<float>(rand() % 13 - 6),
+                           pos.y + static_cast<float>(rand() % 13 - 6),
+                           pos.z + 18.f };
+                } else {
+                    float rad = Natives::GetEntityHeading(ped) * DEG2RAD;
+                    at = { pos.x - sinf(rad) * 4.f,
+                           pos.y + cosf(rad) * 4.f,
+                           pos.z + 0.3f };
+                }
+                float head = Natives::GetEntityHeading(ped);
+                uint64_t a[8];
+                a[0] = 4;               // pedType civ
+                a[1] = s_PModel;
+                a[2] = FA(at.x); a[3] = FA(at.y); a[4] = FA(at.z);
+                a[5] = FA(head);
+                a[6] = 0;               // not networked
+                a[7] = 0;
+                uint64_t r[4] = {};
+                if (CN("CREATE_PED", a, 8, r) && r[0]) {
+                    int p = static_cast<int>(r[0]);
+                    if (!s_PigMode) {
+                        if (g_Fun.pedBodyguard) {
+                            uint64_t ga[] = { static_cast<uint64_t>(player) };
+                            uint64_t gr[4] = {};
+                            if (CN("GET_PLAYER_GROUP", ga, 1, gr) && gr[0]) {
+                                uint64_t ba[] = { static_cast<uint64_t>(p), gr[0] };
+                                CN("SET_PED_AS_GROUP_MEMBER", ba, 2);
+                                Log::Write("Guarda-costas no seu grupo.");
+                            }
+                        }
+                        if (g_Fun.pedHostile) {
+                            uint64_t ta[] = { static_cast<uint64_t>(p),
+                                              static_cast<uint64_t>(ped), 0, 16 };
+                            CN("TASK_COMBAT_PED", ta, 4);
+                            Log::Write("Ped hostil contra voce!");
+                        }
+                    }
+                    Log::Write("Ped spawnado (id %d).", p);
+                } else {
+                    Log::Write("Ped: CREATE_PED falhou (server pode bloquear).");
+                    if (s_PigMode) s_PigLeft = 0;
+                }
+                Natives::SetModelNoLongerNeeded(s_PModel);
+                s_PStage = PStage::Idle;
+            }
+        }
+
+        // ---------------- vehicle fun ----------------
+        int veh = Natives::IsPedInAnyVehicle(ped) ? Natives::GetVehiclePedIsIn(ped) : 0;
+        if (g_Fun.repairVeh) {
+            g_Fun.repairVeh = false;
+            if (veh) {
+                uint64_t a[] = { static_cast<uint64_t>(veh) };
+                CN("SET_VEHICLE_FIXED", a, 1);
+                uint64_t b[] = { static_cast<uint64_t>(veh), FA(0.f) };
+                CN("SET_VEHICLE_DIRT_LEVEL", b, 2);
+                Log::Write("Veiculo consertado.");
+            } else Log::Write("Sem veiculo para consertar.");
+        }
+        if (g_Fun.flipVeh) {
+            g_Fun.flipVeh = false;
+            if (veh) Natives::SetVehicleOnGroundProperly(veh);
+            else Log::Write("Sem veiculo para virar.");
+        }
+        if (g_Fun.boostVeh) {
+            g_Fun.boostVeh = false;
+            if (veh) {
+                float sp = Natives::GetEntitySpeed(veh) + 35.f;
+                uint64_t a[] = { static_cast<uint64_t>(veh), FA(sp) };
+                CN("SET_VEHICLE_FORWARD_SPEED", a, 2);
+                Log::Write("Turbo!");
+            } else Log::Write("Entre num veiculo pro turbo.");
+        }
+    }
+
     // ---- RestoreAll: devolve o ped ao estado normal ----------------------
     //  Chamada no unload, quando o sistema de natives cai e pelo botao
     //  "Restaurar tudo" — evita ficar preso invisivel/sem colisao.
@@ -319,11 +614,37 @@ namespace C4pt0r::Features
             __try { Natives::SetRunSprintMultiplier(player, 1.0f); }
             __except (EXCEPTION_EXECUTE_HANDLER) {}
         }
+        // aborta TP em voo (descongela a entidade que estava no ar)
+        if (s_TpBusy && s_TpEnt) {
+            __try { Natives::FreezeEntityPosition(s_TpEnt, false); }
+            __except (EXCEPTION_EXECUTE_HANDLER) {}
+            s_TpBusy = false;
+            SceneStop();
+        }
+        // mundo/diversao de volta ao normal
+        __try {
+            uint64_t zero[] = { 0 };
+            uint64_t one[]  = { FA(1.f) };
+            CN("SET_SEETHROUGH", zero, 1);
+            CN("SET_NIGHTVISION", zero, 1);
+            CN("SET_TIME_SCALE", one, 1);
+            CN("PAUSE_CLOCK", zero, 1);
+            CN("CLEAR_OVERRIDE_WEATHER");
+            CN("SET_GRAVITY_LEVEL", zero, 1);
+            if (ped)    { uint64_t a[] = { static_cast<uint64_t>(ped), 0 };
+                          CN("SET_PED_IS_DRUNK", a, 2); }
+            if (player) { uint64_t a[] = { static_cast<uint64_t>(player), 0 };
+                          CN("SET_POLICE_IGNORE_PLAYER", a, 2);
+                          CN("SET_EVERYONE_IGNORE_PLAYER", a, 2); }
+        } __except (EXCEPTION_EXECUTE_HANDLER) {}
         // limpa flags que mantinham estado
         g_Player.godmode = g_Player.invisible = g_Player.noRecoil = false;
         g_Player.infiniteAmmo = g_Player.speedHack = g_Player.noclip = false;
         g_Farm.running = false;
+        g_Fun = FunConfig{};
         s_WasNoclip = false;
+        s_PStage = PStage::Idle;
+        s_PigLeft = 0;
         Log::Write("RestoreAll: estado do ped restaurado.");
     }
 
@@ -645,6 +966,7 @@ namespace C4pt0r::Features
         TickNoclip();
         TickTeleport();
         TickVehicleSpawn();
+        TickFun();
         TickPlayerData();
         TickAimbot();
         TickInspector();

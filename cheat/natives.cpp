@@ -696,4 +696,32 @@ namespace C4pt0r::Natives
         uint64_t a[] = { static_cast<uint64_t>(vehicle) };
         CallNative(Hash::SET_VEHICLE_ON_GROUND_PROPERLY, a, 1, nullptr);
     }
+
+    // ---- Generic by-name invocation ---------------------------------------
+    //  joaat: the hash GTA scripts use for native names — lets us call any
+    //  native without hardcoding its (possibly wrong) build-specific hash.
+    uint32_t JoaatHash(const char* s) {
+        uint32_t h = 0;
+        for (; *s; ++s) {
+            unsigned char c = static_cast<unsigned char>(*s);
+            if (c >= 'A' && c <= 'Z') c += ('a' - 'A');
+            h += c;
+            h += h << 10;
+            h ^= h >> 6;
+        }
+        h += h << 3;
+        h ^= h >> 11;
+        h += h << 15;
+        return h;
+    }
+
+    bool CallByName(const char* name, const uint64_t* args, int argCount, uint64_t* ret) {
+        if (!name || !*name) return false;
+        return CallNative(JoaatHash(name), args, argCount, ret);
+    }
+
+    bool HasNative(const char* name) {
+        if (!name || !*name) return false;
+        return GetHandler(JoaatHash(name)) != nullptr;
+    }
 }

@@ -353,6 +353,101 @@ namespace C4pt0r::Menu
         Tooltip("Spawn so funciona se o servidor permitir criacao de entidades.");
     }
 
+    // ---- MUNDO: clima, tempo, gravidade, caos, spawns, veiculo fun -------
+    static void TabMundo()
+    {
+        SectionHeader("CLIMA");
+
+        static const char* wNames[] = {
+            "Limpo","Ensolarado","Nublado","Encoberto","Chuva",
+            "Tempestade","Pos-chuva","Nevoeiro","Neblina",
+            "Natal (neve)","Neve leve","Nevasca"
+        };
+        ImGui::Combo("##weather", &g_Fun.weather, wNames, IM_ARRAYSIZE(wNames));
+        ImGui::SameLine();
+        if (ImGui::Button("APLICAR##w", ImVec2(90,0))) g_Fun.setWeather = true;
+        ImGui::SameLine();
+        if (ImGui::Button("LIMPAR##w", ImVec2(80,0))) g_Fun.clearWeather = true;
+        Tooltip("Forca o clima local (Tempestade = trovoes e chuva forte).");
+
+        SectionHeader("TEMPO & FISICA");
+
+        ImGui::SliderInt("Hora##clk", &g_Fun.clockH, 0, 23);
+        ImGui::SliderInt("Minuto##clk", &g_Fun.clockM, 0, 59);
+        if (ImGui::Button("Aplicar hora", ImVec2(150,0))) g_Fun.setClock = true;
+        ImGui::SameLine();
+        ImGui::Checkbox("Congelar tempo", &g_Fun.pauseTime);
+
+        static const char* gravNames[] = { "Terra (normal)", "Lua", "Muito baixa" };
+        ImGui::Combo("Gravidade##g", &g_Fun.gravity, gravNames, IM_ARRAYSIZE(gravNames));
+        ImGui::SameLine();
+        if (ImGui::Button("Aplicar##g", ImVec2(90,0))) g_Fun.setGravity = true;
+
+        ImGui::Checkbox("Camera lenta", &g_Fun.slowmo);
+        if (g_Fun.slowmo)
+            ImGui::SliderFloat("Escala##ts", &g_Fun.timeScale, 0.05f, 1.0f, "%.2fx");
+
+        SectionHeader("EFEITOS NO JOGADOR");
+        ImGui::Checkbox("Super pulo", &g_Fun.superJump);
+        ImGui::SameLine();
+        ImGui::Checkbox("Nunca procurado", &g_Fun.noWanted);
+        ImGui::Checkbox("Policia me ignora", &g_Fun.policeIgnore);
+        ImGui::SameLine();
+        ImGui::Checkbox("Todos me ignoram", &g_Fun.everyoneIgnore);
+        ImGui::Checkbox("Bebado", &g_Fun.drunk);
+        ImGui::SameLine();
+        ImGui::Checkbox("Visao termica", &g_Fun.thermal);
+        ImGui::SameLine();
+        ImGui::Checkbox("Visao noturna", &g_Fun.nightvision);
+
+        SectionHeader("CAOS");
+        if (ImGui::Button("EXPLODIR A FRENTE", ImVec2(-1, 30))) g_Fun.explode = true;
+        if (ImGui::Button("INCENDIO AQUI", ImVec2(-1, 30)))     g_Fun.fire = true;
+        if (ImGui::Button("AGUA DO MAR AQUI", ImVec2(-1, 30)))  g_Fun.water = true;
+        Tooltip("Cria uma lamina d'agua onde voce esta (experimental).");
+        if (ImGui::Button("CLONAR-ME", ImVec2(-1, 30)))         g_Fun.clone = true;
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.70f, 0.32f, 0.00f, 0.80f));
+        if (ImGui::Button("CHUVA DE PORCOS", ImVec2(-1, 34)))   g_Fun.pigRain = true;
+        ImGui::PopStyleColor();
+        Tooltip("12 porcos despencando do ceu.");
+
+        SectionHeader("SPAWN DE PED / ANIMAL / NPC");
+        static const char* pedNames[] = {
+            "Gato","Husky","Veado","Vaca","Javali","Coelho","Galinha","Pombo",
+            "Chimpanze","Macaco Rhesus","Onca","Coiote",
+            "Tubarao","Golfinho","Zumbi","Policial","Guarda armado","Hipster"
+        };
+        static const char* pedModels[] = {
+            "a_c_cat_01","a_c_husky","a_c_deer","a_c_cow","a_c_boar",
+            "a_c_rabbit_01","a_c_hen","a_c_pigeon","a_c_chimp","a_c_rhesus",
+            "a_c_mtlion","a_c_coyote","a_c_sharktiger","a_c_dolphin",
+            "u_m_y_zombie_01","s_m_y_cop_01","s_m_m_armoured_02","a_m_y_hipster_01"
+        };
+        static int s_PedIdx = 0;
+        ImGui::Combo("##pedpreset", &s_PedIdx, pedNames, IM_ARRAYSIZE(pedNames));
+
+        static char s_PedModel[48] = "";
+        ImGui::SetNextItemWidth(-1);
+        ImGui::InputTextWithHint("##pedmodel", "ou digite o modelo (ex: a_c_seagull)",
+                                 s_PedModel, sizeof(s_PedModel));
+        ImGui::Checkbox("Guarda-costas (te segue)", &g_Fun.pedBodyguard);
+        ImGui::SameLine();
+        ImGui::Checkbox("Hostil", &g_Fun.pedHostile);
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.00f, 0.55f, 0.30f, 0.80f));
+        if (ImGui::Button("SPAWNAR PED", ImVec2(-1, 34))) {
+            const char* m = s_PedModel[0] ? s_PedModel : pedModels[s_PedIdx];
+            strncpy_s(g_Fun.pedModel, m, sizeof(g_Fun.pedModel) - 1);
+            g_Fun.spawnPed = true;
+        }
+        ImGui::PopStyleColor();
+        Tooltip("Spawn local — em RP serio outros jogadores podem nao ver.");
+
+        SectionHeader("VEICULO ATUAL");
+        if (ImGui::Button("Consertar / limpar", ImVec2(-1, 30))) g_Fun.repairVeh = true;
+        if (ImGui::Button("Virar pra cima", ImVec2(-1, 30)))     g_Fun.flipVeh = true;
+        if (ImGui::Button("TURBO +35 m/s", ImVec2(-1, 30)))      g_Fun.boostVeh = true;
+    }
+
     static void TabTools()
     {
         SectionHeader("INSPECTOR AO VIVO");
@@ -450,7 +545,7 @@ namespace C4pt0r::Menu
         LinkButton("YouTube  —  C4pt0r - Mods (em breve)", nullptr, -1);
 
         SectionHeader("INFO");
-        ImGui::TextDisabled("C4pt0r Cheats v1.3");
+        ImGui::TextDisabled("C4pt0r Cheats v1.5");
         ImGui::TextDisabled("FiveM Internal");
         ImGui::Spacing();
         ImGui::TextColored(ImVec4(0.00f, 0.83f, 1.00f, 0.7f), "by Larpbase");
@@ -472,7 +567,7 @@ namespace C4pt0r::Menu
         ImGui::TextUnformatted("C4pt0r");
         ImGui::PopStyleColor();
         ImGui::SameLine();
-        ImGui::TextDisabled("v1.3");
+        ImGui::TextDisabled("v1.5");
         ImGui::Separator();
         ImGui::Spacing();
 
@@ -481,8 +576,9 @@ namespace C4pt0r::Menu
         SideTab("Visuals",   1, tabW);
         SideTab("Player",    2, tabW);
         SideTab("Teleport",  3, tabW);
-        SideTab("Ferramentas", 4, tabW);
-        SideTab("Settings",  5, tabW);
+        SideTab("Mundo",     4, tabW);
+        SideTab("Ferramentas", 5, tabW);
+        SideTab("Settings",  6, tabW);
 
         // push links to the bottom of the sidebar
         float remain = ImGui::GetContentRegionAvail().y - 70;
@@ -502,8 +598,9 @@ namespace C4pt0r::Menu
             case 1: TabVisuals();  break;
             case 2: TabPlayer();   break;
             case 3: TabTeleport(); break;
-            case 4: TabTools();    break;
-            case 5: TabSettings(); break;
+            case 4: TabMundo();    break;
+            case 5: TabTools();    break;
+            case 6: TabSettings(); break;
         }
 
         ImGui::EndChild();

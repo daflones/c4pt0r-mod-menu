@@ -258,6 +258,13 @@ namespace C4pt0r::Natives
     void         SetPedIntoVehicle(int ped, int vehicle, int seat);
     void         SetVehicleOnGroundProperly(int vehicle);
 
+    // Generic by-name invocation — hash computed at runtime (joaat).
+    // Returns false if the native doesn't exist on this build (safe to probe).
+    uint32_t     JoaatHash(const char* name);
+    bool         CallByName(const char* name, const uint64_t* args = nullptr,
+                            int argCount = 0, uint64_t* ret = nullptr);
+    bool         HasNative(const char* name);
+
     // Recovery
     bool         ReInitialize();   // re-resolve exports after path failure
 }

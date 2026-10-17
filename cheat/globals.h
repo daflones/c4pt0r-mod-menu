@@ -101,6 +101,43 @@ namespace C4pt0r
         char  model[48] = {};
     };
 
+    // ---------------------------------------------- Mundo / diversao
+    struct FunConfig {
+        // toggles — re-applied while on (all OFF at inject)
+        bool  superJump      = false;
+        bool  noWanted       = false;
+        bool  policeIgnore   = false;
+        bool  everyoneIgnore = false;
+        bool  drunk          = false;
+        bool  thermal        = false;
+        bool  nightvision    = false;
+        bool  slowmo         = false;
+        float timeScale      = 0.30f;
+        bool  pauseTime      = false;
+
+        // one-shot world controls
+        bool  setWeather     = false; int  weather  = 0;
+        bool  clearWeather   = false;
+        bool  setClock       = false; int  clockH   = 12; int clockM = 0;
+        bool  setGravity     = false; int  gravity  = 0;
+        bool  explode        = false;
+        bool  fire           = false;
+        bool  water          = false;
+
+        // ped/animal/npc spawning
+        bool  spawnPed       = false;
+        char  pedModel[48]   = {};
+        bool  pedBodyguard   = false;
+        bool  pedHostile     = false;
+        bool  pigRain        = false;
+        bool  clone          = false;
+
+        // vehicle fun
+        bool  repairVeh      = false;
+        bool  flipVeh        = false;
+        bool  boostVeh       = false;
+    };
+
     struct MenuConfig {
         int  toggleKey    = VK_F9;
         bool isOpen       = true;
@@ -199,6 +236,7 @@ namespace C4pt0r
     inline int              g_PlayerListCount = 0;
     inline std::mutex       g_DataMutex;
     inline VehicleConfig    g_Vehicle;
+    inline FunConfig        g_Fun;
     inline int           g_ScreenWidth  = 1920;
     inline int           g_ScreenHeight = 1080;
 }
