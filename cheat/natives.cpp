@@ -67,6 +67,26 @@ namespace C4pt0r::Natives
     static int s_FailA = 0, s_FailB = 0, s_FailC = 0;
     static constexpr int PATH_FAIL_LIMIT = 30;
 
+    // telemetria pro menu/diagnostico
+    static uint64_t s_OkCount   = 0;
+    static uint64_t s_FailCount = 0;
+    static int64_t  s_LastOkMs  = 0;
+    static int64_t NowMs() {
+        return std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+    }
+
+    // SEH-safe invocation — catch(...) does NOT trap access violations and
+    // an AV inside a native handler is what silently killed the cheat loop.
+    static bool InvokePathA(uint64_t hash, FxScriptContext& ctx) {
+        __try { return s_CallNative(hash, &ctx); }
+        __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+    }
+    static bool InvokeHandler(NativeHandler h, NativeCallContext& ctx) {
+        __try { h(&ctx); return true; }
+        __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
+    }
+
     static bool TryExports();  // fwd — full impl below
 
     // Self-heal: when every path has been retired, re-resolve the exports
@@ -90,41 +110,42 @@ namespace C4pt0r::Natives
 
         // Path A: FiveM's exported high-level invoke (does everything)
         if (s_CallNative) {
-            try {
-                FxScriptContext ctx;
-                ctx.Reset();
-                for (int i = 0; i < nargs; ++i) ctx.args[i] = args[i];
-                ctx.numArgs = nargs;
-                bool ok = s_CallNative(hash, &ctx);
-                if (ok) {
-                    s_FailA = 0;
-                    if (ret) {
-                        ret[0] = ctx.rets[0];
-                        ret[1] = ctx.rets[1];
-                        ret[2] = ctx.rets[2];
-                        ret[3] = ctx.rets[3];
-                    }
-                    return true;
+            FxScriptContext ctx;
+            ctx.Reset();
+            for (int i = 0; i < nargs; ++i) ctx.args[i] = args[i];
+            ctx.numArgs = nargs;
+            bool ok = InvokePathA(hash, ctx);
+            if (ok) {
+                s_FailA = 0;
+                ++s_OkCount; s_LastOkMs = NowMs();
+                if (ret) {
+                    ret[0] = ctx.rets[0];
+                    ret[1] = ctx.rets[1];
+                    ret[2] = ctx.rets[2];
+                    ret[3] = ctx.rets[3];
                 }
-                // returned false = native blocked/missing — fall through
-                // to the raw paths, they may still resolve it
-            } catch (...) {
-                if (++s_FailA == PATH_FAIL_LIMIT) {
-                    s_CallNative = nullptr;
-                    Log::Write("CallNativeHandler path died (%d throws) — dropping to rage path.", s_FailA);
-                }
+                return true;
+            }
+            // returned false = native blocked/missing — the raw paths may
+            // still resolve it; SEH faults inside get counted so a dead
+            // path is retired instead of killing the whole loop
+            if (++s_FailA == PATH_FAIL_LIMIT) {
+                s_CallNative = nullptr;
+                Log::Write("CallNativeHandler path died (%d fails) — dropping to rage path.", s_FailA);
             }
         }
 
         // Path B: exported scrEngine::GetNativeHandler -> call raw handler
         if (s_RageGNH) {
-            try {
-                NativeHandler h = s_RageGNH(hash);
-                if (h && Memory::IsExecutable(reinterpret_cast<uintptr_t>(h))) {
-                    NativeCallContext ctx;
-                    for (int i = 0; i < nargs; ++i) ctx.Push(args[i]);
-                    h(&ctx);
+            NativeHandler h = nullptr;
+            __try { h = s_RageGNH(hash); }
+            __except (EXCEPTION_EXECUTE_HANDLER) { h = nullptr; }
+            if (h && Memory::IsExecutable(reinterpret_cast<uintptr_t>(h))) {
+                NativeCallContext ctx;
+                for (int i = 0; i < nargs; ++i) ctx.Push(args[i]);
+                if (InvokeHandler(h, ctx)) {
                     s_FailB = 0;
+                    ++s_OkCount; s_LastOkMs = NowMs();
                     if (ret) {
                         const uint64_t* rv = ctx.returnValue;
                         ret[0] = rv[0]; ret[1] = rv[1];
@@ -132,25 +153,26 @@ namespace C4pt0r::Natives
                     }
                     return true;
                 }
-            } catch (...) {
-                if (++s_FailB == PATH_FAIL_LIMIT) {
-                    s_RageGNH = nullptr;
-                    Log::Write("rage GetNativeHandler path died (%d throws) — dropping to raw table.", s_FailB);
-                }
+            }
+            if (++s_FailB == PATH_FAIL_LIMIT) {
+                s_RageGNH = nullptr;
+                Log::Write("rage GetNativeHandler path died (%d fails) — dropping to raw table.", s_FailB);
             }
         }
 
         // Path C: raw table walk (mapped hash, raw handler — likely
         // adhesive-encrypted on this build; still try as last resort)
         if (s_GetNativeHandler && s_NativeTable) {
-            try {
-                uint64_t h2 = s_MapNative ? s_MapNative(hash) : hash;
-                NativeHandler h = s_GetNativeHandler(s_NativeTable, h2);
-                if (h && Memory::IsExecutable(reinterpret_cast<uintptr_t>(h))) {
-                    NativeCallContext ctx;
-                    for (int i = 0; i < nargs; ++i) ctx.Push(args[i]);
-                    h(&ctx);
+            NativeHandler h = nullptr;
+            uint64_t h2 = s_MapNative ? s_MapNative(hash) : hash;
+            __try { h = s_GetNativeHandler(s_NativeTable, h2); }
+            __except (EXCEPTION_EXECUTE_HANDLER) { h = nullptr; }
+            if (h && Memory::IsExecutable(reinterpret_cast<uintptr_t>(h))) {
+                NativeCallContext ctx;
+                for (int i = 0; i < nargs; ++i) ctx.Push(args[i]);
+                if (InvokeHandler(h, ctx)) {
                     s_FailC = 0;
+                    ++s_OkCount; s_LastOkMs = NowMs();
                     if (ret) {
                         const uint64_t* rv = ctx.returnValue;
                         ret[0] = rv[0]; ret[1] = rv[1];
@@ -158,14 +180,14 @@ namespace C4pt0r::Natives
                     }
                     return true;
                 }
-            } catch (...) {
-                if (++s_FailC == PATH_FAIL_LIMIT) {
-                    s_GetNativeHandler = nullptr;
-                    Log::Write("Raw table path died (%d throws) — no native paths left.", s_FailC);
-                }
+            }
+            if (++s_FailC == PATH_FAIL_LIMIT) {
+                s_GetNativeHandler = nullptr;
+                Log::Write("Raw table path died (%d fails) — no native paths left.", s_FailC);
             }
         }
 
+        ++s_FailCount;
         return false;
     }
 
@@ -245,6 +267,8 @@ namespace C4pt0r::Natives
 
     bool Initialize()
     {
+        s_Ready = false;   // stale "ready" during a failing re-init was the
+                           // silent-death bug — always reset first
         bool haveExports = TryExports();
         TryPatternScan();   // still useful as fallback + diagnostics
 
@@ -294,6 +318,28 @@ namespace C4pt0r::Natives
     }
 
     bool IsReady() { return s_Ready; }
+
+    void MarkUnhealthy() { s_Ready = false; }
+
+    // cheap liveness probe — PLAYER_PED_ID via every available path
+    bool Ping() {
+        uint64_t ret[4] = {};
+        return CallNative(Hash::PLAYER_PED_ID, nullptr, 0, ret);
+    }
+
+    // ms since the last successful native call (for menu diagnostics)
+    long long MsSinceOk() {
+        if (!s_LastOkMs) return -1;
+        return (long long)(NowMs() - s_LastOkMs);
+    }
+
+    // "OK a=0 b=0 c=0 | ok=1234 fail=2" — shown in Settings for debug
+    void HealthString(char* buf, int len) {
+        snprintf(buf, len, "paths[A:%d B:%d C:%d] ok=%llu fail=%llu lastOk=%lldms%s",
+                 s_FailA, s_FailB, s_FailC,
+                 (unsigned long long)s_OkCount, (unsigned long long)s_FailCount,
+                 MsSinceOk(), s_Ready ? "" : " NOT-READY");
+    }
 
     bool ReInitialize() { return Initialize(); }
 

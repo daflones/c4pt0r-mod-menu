@@ -145,6 +145,8 @@ static void MainThread(HMODULE hModule)
     // ---- Main loop: tick features every frame ----
     int consecutiveErrors = 0;
     int recoveryWait = 0;
+    int watchTicks = 0;
+    int deadPings  = 0;
     while (g_Running) {
         if (nativesOk) {
             __try {
@@ -162,9 +164,35 @@ static void MainThread(HMODULE hModule)
                     nativesOk = false;
                     recoveryWait = 0;
                     consecutiveErrors = 0;
+                    Natives::MarkUnhealthy();
                     Log::Write("Features pausadas por excecoes — restaurando ped e agendando re-init.");
                     __try { Features::RestoreAll(); }
                     __except (EXCEPTION_EXECUTE_HANDLER) {}
+                }
+            }
+
+            // Watchdog: natives tambem morrem SEM jogar excecao (CallNative
+            // retorna false, todos os paths falham). Nesse caso o tick roda
+            // mas nada acontece — era o "menu fantasma". Pinga um nativo
+            // seguro a cada ~2s; 2 falhas = declara morto e re-inicializa.
+            if (++watchTicks >= 120) {   // 120 x 16ms ~= 2s
+                watchTicks = 0;
+                bool alive = false;
+                __try { alive = Natives::Ping(); }
+                __except (EXCEPTION_EXECUTE_HANDLER) { alive = false; }
+                if (!alive) {
+                    if (++deadPings >= 2) {
+                        deadPings = 0;
+                        nativesOk = false;
+                        recoveryWait = 0;
+                        Natives::MarkUnhealthy();
+                        Log::Write("Watchdog: natives pararam de responder "
+                                   "sem excecao — re-init agendado.");
+                        __try { Features::RestoreAll(); }
+                        __except (EXCEPTION_EXECUTE_HANDLER) {}
+                    }
+                } else {
+                    deadPings = 0;
                 }
             }
         } else {

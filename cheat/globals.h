@@ -67,9 +67,11 @@ namespace C4pt0r
         bool  healthBars  = true;
         bool  snaplines   = false;
         bool  distance    = true;
+        int   filter      = 0;      // 0=todos 1=so normais 2=so god/admin
         float maxDistance  = 500.0f;
         float boxColor[4]  = { 0.00f, 0.83f, 1.00f, 1.00f };  // cyan
         float nameColor[4] = { 1.00f, 1.00f, 1.00f, 1.00f };
+        float godColor[4]  = { 1.00f, 0.70f, 0.10f, 1.00f };  // dourado
     };
 
     struct PlayerConfig {
@@ -196,6 +198,7 @@ namespace C4pt0r
         char  name[64] = {};
         bool  isDead   = false;
         bool  inVehicle = false;
+        bool  god      = false;   // invencivel -> provavel admin
     };
 
     // Lightweight row for the player list (menu teleport/inspect)

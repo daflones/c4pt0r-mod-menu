@@ -692,6 +692,15 @@ namespace C4pt0r::Features
             int armor = dead ? 0 : Natives::GetPedArmour(ped);
             bool inVeh = Natives::IsPedInAnyVehicle(ped);
 
+            // godmode detection — provavel admin/dono do server (so quando
+            // ESP ligado pra nao gastar natives)
+            bool god = false;
+            if (espOn) {
+                uint64_t ga[] = { static_cast<uint64_t>(i) };
+                uint64_t gr[4] = {};
+                if (CN("GET_PLAYER_INVINCIBLE", ga, 1, gr)) god = gr[0] != 0;
+            }
+
             // player list row (always collected)
             if (count < MAX_PLAYERS) {
                 auto& e = g_PlayerList[count++];
@@ -703,6 +712,9 @@ namespace C4pt0r::Features
 
             // ESP data — only within range when ESP enabled
             if (!espOn || dead || dist > g_ESP.maxDistance) continue;
+            // filtro admin(god)/normal
+            if (g_ESP.filter == 1 && god)  continue;
+            if (g_ESP.filter == 2 && !god) continue;
 
             Vec2 screen;
             bool onScreen = Natives::WorldToScreen(pos, screen);
@@ -720,6 +732,7 @@ namespace C4pt0r::Features
             data.armor       = armor;
             data.isDead      = false;
             data.inVehicle   = inVeh;
+            data.god         = god;
             strncpy_s(data.name, nameBuf, sizeof(data.name) - 1);
         }
         g_PlayerListCount = count;
@@ -997,9 +1010,15 @@ namespace C4pt0r::Features
 
         std::lock_guard<std::mutex> lock(g_DataMutex);
 
+        ImU32 godCol = ImGui::ColorConvertFloat4ToU32(
+            ImVec4(g_ESP.godColor[0], g_ESP.godColor[1], g_ESP.godColor[2], g_ESP.godColor[3]));
+
         for (int i = 0; i < MAX_PLAYERS; ++i) {
             const auto& p = g_PlayersData[i];
             if (!p.active || !p.onScreen) continue;
+
+            // admins/godmode ganham caixa dourada
+            const ImU32 curBox = p.god ? godCol : boxCol;
 
             // Screen coords are 0..1, convert to pixels
             float sx = p.screenPos.x * sw;
@@ -1020,8 +1039,8 @@ namespace C4pt0r::Features
                 // Corner box style (looks cleaner than full rectangle)
                 float cornerLen = boxW * 0.25f;
                 auto drawCorner = [&](float cx, float cy, float dx, float dy) {
-                    drawList->AddLine(ImVec2(cx, cy), ImVec2(cx + dx * cornerLen, cy), boxCol, 2.0f);
-                    drawList->AddLine(ImVec2(cx, cy), ImVec2(cx, cy + dy * cornerLen), boxCol, 2.0f);
+                    drawList->AddLine(ImVec2(cx, cy), ImVec2(cx + dx * cornerLen, cy), curBox, 2.0f);
+                    drawList->AddLine(ImVec2(cx, cy), ImVec2(cx, cy + dy * cornerLen), curBox, 2.0f);
                 };
                 drawCorner(left,  top,     1,  1);
                 drawCorner(right, top,    -1,  1);
@@ -1029,10 +1048,11 @@ namespace C4pt0r::Features
                 drawCorner(right, bottom, -1, -1);
             }
 
-            // ---- Name ([id] nome) ----
+            // ---- Name ([id] nome, [GOD] se admin) ----
             if (g_ESP.names) {
                 char nameBuf[80];
-                snprintf(nameBuf, sizeof(nameBuf), "[%d] %s", p.playerId, p.name);
+                snprintf(nameBuf, sizeof(nameBuf), "[%d] %s%s",
+                         p.playerId, p.name, p.god ? " [GOD]" : "");
                 ImVec2 textSize = ImGui::CalcTextSize(nameBuf);
                 drawList->AddText(
                     ImVec2(sx - textSize.x * 0.5f, top - textSize.y - 4),

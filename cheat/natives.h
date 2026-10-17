@@ -258,6 +258,12 @@ namespace C4pt0r::Natives
     void         SetPedIntoVehicle(int ped, int vehicle, int seat);
     void         SetVehicleOnGroundProperly(int vehicle);
 
+    // Health / diagnostics
+    bool         Ping();                     // cheap liveness probe
+    void         MarkUnhealthy();            // force re-init on next cycle
+    long long    MsSinceOk();                // ms since last successful call
+    void         HealthString(char* buf, int len);
+
     // Generic by-name invocation — hash computed at runtime (joaat).
     // Returns false if the native doesn't exist on this build (safe to probe).
     uint32_t     JoaatHash(const char* name);

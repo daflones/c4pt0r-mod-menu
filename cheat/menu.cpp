@@ -5,6 +5,7 @@
 #include "menu.h"
 #include "globals.h"
 #include "features.h"
+#include "natives.h"
 #include "imgui.h"
 
 #include <shellapi.h>
@@ -130,7 +131,7 @@ namespace C4pt0r::Menu
             ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.00f, 0.45f, 0.58f, 0.60f));
             ImGui::PushStyleColor(ImGuiCol_Text,          ImVec4(0.70f, 0.75f, 0.80f, 1.00f));
         }
-        bool clicked = ImGui::Button(label, ImVec2(width, 36));
+        bool clicked = ImGui::Button(label, ImVec2(width, 40));
         ImGui::PopStyleColor(3);
         if (clicked) g_Menu.currentTab = idx;
         return clicked;
@@ -194,10 +195,17 @@ namespace C4pt0r::Menu
 
             ImGui::SliderFloat("Dist. maxima##esp", &g_ESP.maxDistance, 50.0f, 2000.0f, "%.0f m");
 
+            const char* filtros[] = { "Todos", "So normais", "So admins (god)" };
+            ImGui::Combo("Filtro##esp", &g_ESP.filter, filtros, IM_ARRAYSIZE(filtros));
+            Tooltip("Filtra quem aparece no ESP. 'God' = invencivel — quase sempre admin.");
+
             ImGui::Spacing();
             ImGui::ColorEdit4("Cor caixa##esp",  g_ESP.boxColor,  ImGuiColorEditFlags_NoInputs);
             ImGui::SameLine();
             ImGui::ColorEdit4("Cor nome##esp",   g_ESP.nameColor, ImGuiColorEditFlags_NoInputs);
+            ImGui::SameLine();
+            ImGui::ColorEdit4("Cor admin##esp",  g_ESP.godColor,  ImGuiColorEditFlags_NoInputs);
+            Tooltip("Caixa dourada + tag [GOD] em jogador invencivel.");
         }
     }
 
@@ -539,13 +547,28 @@ namespace C4pt0r::Menu
         ImGui::TextDisabled("Tecla do menu: F9");
         ImGui::TextDisabled("Panic key (unload): END");
 
+        SectionHeader("SISTEMA");
+
+        char hb[160];
+        Natives::HealthString(hb, sizeof(hb));
+        bool ok = Natives::IsReady();
+        if (ok) ImGui::TextColored(ImVec4(0.20f, 0.90f, 0.40f, 1.0f), "Natives: OK");
+        else    ImGui::TextColored(ImVec4(1.00f, 0.35f, 0.40f, 1.0f), "Natives: RECONECTANDO...");
+        ImGui::TextDisabled("%s", hb);
+
+        if (ImGui::Button("FORCAR RECONEXAO", ImVec2(-1, 30))) {
+            __try { Natives::ReInitialize(); }
+            __except (EXCEPTION_EXECUTE_HANDLER) {}
+        }
+        Tooltip("Re-resolve os exports e re-probe os natives (se algo travar).");
+
         SectionHeader("COMUNIDADE");
         LinkButton("Discord  —  discord.gg/PhkbhxMBy",
                    "https://discord.gg/PhkbhxMBy", -1);
         LinkButton("YouTube  —  C4pt0r - Mods (em breve)", nullptr, -1);
 
         SectionHeader("INFO");
-        ImGui::TextDisabled("C4pt0r Cheats v1.5");
+        ImGui::TextDisabled("C4pt0r Cheats v1.7");
         ImGui::TextDisabled("FiveM Internal");
         ImGui::Spacing();
         ImGui::TextColored(ImVec4(0.00f, 0.83f, 1.00f, 0.7f), "by Larpbase");
@@ -554,20 +577,30 @@ namespace C4pt0r::Menu
     // ---- Main render ----------------------------------------------------
     void Render()
     {
-        ImGui::SetNextWindowSize(ImVec2(600, 460), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(720, 540), ImGuiCond_FirstUseEver);
 
         ImGui::Begin("C4pt0r Cheats##main", &g_Menu.isOpen,
             ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoScrollbar);
 
         // ---- Sidebar ----
-        ImGui::BeginChild("##sidebar", ImVec2(140, 0),
+        ImGui::BeginChild("##sidebar", ImVec2(160, 0),
                           ImGuiChildFlags_Border | ImGuiChildFlags_ResizeX);
 
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.00f, 0.83f, 1.00f, 1.00f));
         ImGui::TextUnformatted("C4pt0r");
         ImGui::PopStyleColor();
         ImGui::SameLine();
-        ImGui::TextDisabled("v1.5");
+        ImGui::TextDisabled("v1.7");
+
+        // indicador de saude dos natives — visivel de cara se cair
+        bool nOk = Natives::IsReady();
+        ImVec2 dp = ImGui::GetCursorScreenPos();
+        ImGui::GetWindowDrawList()->AddCircleFilled(
+            ImVec2(dp.x + 5, dp.y + 8), 4.0f,
+            nOk ? IM_COL32(40, 220, 90, 255) : IM_COL32(255, 60, 70, 255));
+        ImGui::Dummy(ImVec2(14, 0));
+        ImGui::SameLine();
+        ImGui::TextDisabled("%s", nOk ? "natives ok" : "reconectando");
         ImGui::Separator();
         ImGui::Spacing();
 
