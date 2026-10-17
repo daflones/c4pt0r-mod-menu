@@ -315,17 +315,14 @@ namespace C4pt0r::Menu
         Tooltip("Trazer o jogador pra perto de voce (efeito local).");
 
         SectionHeader("ACOES");
-        ImGui::Checkbox("Eventos de server (experimental)", &g_PActions.serverEvents);
-        Tooltip("Dispara TriggerServerEvent pros recursos de medico/carry. "
-                "SE CRASHAR O JOGO, e esse native que mata — deixa desligado.");
         if (ImGui::Button("DAR GOD", ImVec2(ImGui::GetContentRegionAvail().x * 0.48f, 30)))
             g_PActions.giveGodId = s_SelPlayer;
         ImGui::SameLine();
         if (ImGui::Button("RESSUSCITAR", ImVec2(-1, 30)))
             g_PActions.reviveId = s_SelPlayer;
-        Tooltip("Dispara o evento de paramedico pro server reanimar o alvo "
-                "(igual o trabalho de medico). Se nenhum resource responder, "
-                "faz revive local se o server der controle.");
+        Tooltip("Faz a animacao de RCP e reanima o alvo SE o servidor ceder "
+                "controle do ped. Revive de verdade server-side so via "
+                "resource da cidade (o client sozinho nao consegue).");
 
         if (g_PActions.grabActive) {
             if (ImGui::Button("SOLTAR PLAYER", ImVec2(-1, 30)))

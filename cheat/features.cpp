@@ -1326,71 +1326,11 @@ namespace C4pt0r::Features
         }
     }
 
-    // ---- MsgPack minimo + TriggerServerEvent ------------------------------
-    //  TriggerServerEvent do Lua serializa os args como ARRAY msgpack e
-    //  chama o native TRIGGER_SERVER_EVENT_INTERNAL(nome, payload, len).
-    //  Isso deixa o cheat disparar eventos de resources do server (carry,
-    //  etc.) — so funciona se o resource existir e aceitar a chamada.
-    struct MsgPack {
-        std::vector<uint8_t> b;
-        void U16(uint16_t v) { b.push_back(uint8_t(v >> 8)); b.push_back(uint8_t(v)); }
-        void U32(uint32_t v) { for (int s = 24; s >= 0; s -= 8) b.push_back(uint8_t(v >> s)); }
-        void U64(uint64_t v) { for (int s = 56; s >= 0; s -= 8) b.push_back(uint8_t(v >> s)); }
-        void BeginArray(int n) { b.push_back(uint8_t(0x90 | n)); }
-        void Int(int64_t v) {
-            if (v >= 0 && v < 128)           b.push_back((uint8_t)v);
-            else if (v >= -32 && v < 0)      b.push_back((uint8_t)v);           // neg fixint
-            else if (v >= 0 && v <= 0xFF)    { b.push_back(0xCC); b.push_back((uint8_t)v); }
-            else if (v >= 0 && v <= 0xFFFF)  { b.push_back(0xCD); U16((uint16_t)v); }
-            else if (v >= 0 && v <= 0xFFFFFFFFull) { b.push_back(0xCE); U32((uint32_t)v); }
-            else if (v >= -128)              { b.push_back(0xD0); b.push_back((uint8_t)v); }
-            else if (v >= -32768)            { b.push_back(0xD1); U16((uint16_t)v); }
-            else if (v >= INT32_MIN)         { b.push_back(0xD2); U32((uint32_t)v); }
-            else                             { b.push_back(0xD3); U64((uint64_t)v); }
-        }
-        void Flt(double d) { b.push_back(0xCB); uint64_t u; memcpy(&u, &d, 8); U64(u); }
-        void Str(const char* s) {
-            size_t n = strlen(s);
-            if (n < 32)       b.push_back(uint8_t(0xA0 | n));
-            else if (n < 256) { b.push_back(0xD9); b.push_back((uint8_t)n); }
-            else              { b.push_back(0xDA); U16((uint16_t)n); }
-            b.insert(b.end(), s, s + n);
-        }
-    };
-
-    static bool TriggerServer(const char* event, const MsgPack& args)
-    {
-        // gate global: TRIGGER_SERVER_EVENT_INTERNAL e o principal suspeito
-        // do crash +0x1750 — desligado por padrao ate provar que e seguro
-        if (!g_PActions.serverEvents) {
-            Log::Step("TriggerServer '%s' PULADO (eventos de server off)", event);
-            return false;
-        }
-        // O payload tem que sobreviver a chamada: se o native enfileira a
-        // serializacao pra net thread ler depois, um buffer de stack vira
-        // ponteiro pendurado -> net thread le lixo -> call p/ endereco
-        // corrompido (crash DEP no exe). Vaza ~bytes por evento, trivial.
-        size_t n = args.b.size();
-        uint8_t* blob = new uint8_t[n + 1];
-        memcpy(blob, args.b.data(), n);
-        blob[n] = 0;
-        Log::Step("TriggerServer '%s' payload=%zu bytes", event, n);
-        uint64_t a[3] = { (uint64_t)event,
-                          (uint64_t)blob,
-                          (uint64_t)n };
-        bool ok = CN("TRIGGER_SERVER_EVENT_INTERNAL", a, 3);
-        Log::Step("TriggerServer '%s' retornou %d", event, ok ? 1 : 0);
-        return ok;
-    }
-
-    // server id do alvo (o que os eventos de server esperam, nao o idx local)
-    static int PlayerServerId(int playerIdx)
-    {
-        uint64_t a[1] = { (uint64_t)playerIdx };
-        uint64_t r[4] = {};
-        if (CN("GET_PLAYER_SERVER_ID", a, 1, r) && r[0]) return (int)r[0];
-        return -1;
-    }
+    // TriggerServerEvent removido: natives CFX (TRIGGER_SERVER_EVENT_INTERNAL,
+    // GET_PLAYER_SERVER_ID...) NAO estao na tabela de natives do GTA5 — o
+    // lookup joaat32 cai em bucket colidido e retorna um handler errado que
+    // passa no IsExecutable -> executa funcao aleatoria -> crash +0x1750.
+    // Nao existe caminho seguro pra server event por esse invoke.
 
     // ---- Acoes em outros jogadores: dar god / agarrar --------------------
     //  O ped de outro player pertence ao cliente dele — se o server nao
@@ -1400,7 +1340,6 @@ namespace C4pt0r::Features
     static int  s_GrabPed      = 0;    // alvo esperando controle
     static int  s_GrabAttached = 0;    // alvo ja carregado no ombro
     static int  s_GrabTries    = 0;
-    static int  s_GrabSrvId    = -1;   // server id do alvo (eventos de stop)
 
     static void GrabDetach()
     {
@@ -1409,44 +1348,11 @@ namespace C4pt0r::Features
             CN("DETACH_ENTITY", a, 3);
         }
         s_GrabPed = s_GrabAttached = 0;
-        s_GrabSrvId = -1;
         g_PActions.grabActive = false;
     }
 
-    // dispara os eventos de carry mais usados em server BR (vRP/creative):
-    // CarryPeople:sync(srvId) e cmg2_animations:sync(14 args). Se o server
-    // nao tiver o resource, eles nao fazem nada — o attach local fica de
-    // fallback visual.
-    static void GrabFireServerStart(int localIdx)
-    {
-        int srvId = PlayerServerId(localIdx);
-        s_GrabSrvId = srvId;
-        if (srvId <= 0) {
-            Log::Write("Grab: sem server id — eventos de server pulados.");
-            return;
-        }
-        { MsgPack m; m.BeginArray(1); m.Int(srvId);
-          TriggerServer("CarryPeople:sync", m); }
-        { MsgPack m; m.BeginArray(15);
-          m.Int(localIdx);
-          m.Str("missfinale_c2mcs_1"); m.Str("nm");
-          m.Str("fin_c2_mcs_1_camman"); m.Str("firemans_carry");
-          m.Flt(0.15); m.Flt(0.27); m.Flt(0.63);
-          m.Int(srvId); m.Int(100000); m.Flt(0.0);
-          m.Int(49); m.Int(33); m.Int(1);
-          TriggerServer("cmg2_animations:sync", m); }
-        Log::Write("Grab: eventos de carry disparados pro server (srvId %d).", srvId);
-    }
-
-    static void GrabFireServerStop()
-    {
-        if (s_GrabSrvId <= 0) return;
-        { MsgPack m; m.BeginArray(1); m.Int(s_GrabSrvId);
-          TriggerServer("CarryPeople:stop", m); }
-        { MsgPack m; m.BeginArray(1); m.Int(s_GrabSrvId);
-          TriggerServer("cmg2_animations:stop", m); }
-        s_GrabSrvId = -1;
-    }
+    // (os eventos de carry de server foram removidos — natives CFX nao
+    // sao alcancaveis pela nossa invocacao de native do GTA5)
 
     static void TickPlayerActions()
     {
@@ -1482,33 +1388,18 @@ namespace C4pt0r::Features
             }
         }
 
-        // ---- ressuscitar: eventos de paramedico, 1 por tick --------------
-        // Disparar os 7 de uma vez impede saber qual crashou — a fila roda
-        // um por tick com Step() sincrono antes de cada disparo.
-        static int s_ReviveSrv   = -1;
-        static int s_ReviveEvIdx = 0;
-        static const char* kReviveEvents[] = {
-            "esx_ambulancejob:revive",   // ESX classico
-            "qb-ambulancejob:revive",    // QBCore
-            "osp_ambulance:revive",      // OSP
-            "wasabi_ambulance:revive",   // Wasabi
-            "paramedico:reanimar",       // vRP BR
-            "hospital:reanimar",         // hospital BR
-            "vrp:reanimar",              // vRP BR generico
-        };
-
+        // ---- ressuscitar: animacao de RCP + RESURRECT_PED se o server
+        //      ceder controle do ped caido (sem controle, nao toca — mutar
+        //      ped remoto sem ownership corrompe o sync e crasha) ----------
         if (g_PActions.reviveId >= 0) {
             int target = g_PActions.reviveId;
             g_PActions.reviveId = -1;
             Log::Step("Revive iniciado id=%d", target);
-            int srv = PlayerServerId(target);
             int tped = Natives::GetPlayerPed(target);
-            Log::Step("Revive srvId=%d tped=%d", srv, tped);
+            Log::Step("Revive tped=%d", tped);
             if (!tped) {
                 Log::Write("Revive: id %d sem ped (offline?).", target);
             } else {
-                if (srv > 0) { s_ReviveSrv = srv; s_ReviveEvIdx = 0; }
-                else Log::Write("Revive: sem server id — so o local.");
                 // CPR cosmetica no nosso ped (igual o medico faz)
                 uint64_t rd[2] = { (uint64_t)"mini@cpr@char_a@cpr_str", 0 };
                 CN("REQUEST_ANIM_DICT", rd, 2);
@@ -1518,7 +1409,6 @@ namespace C4pt0r::Features
                     FA(8.f), FA(-8.f), (uint64_t)-1, 0, 0, 0, 0 };
                 CN("TASK_PLAY_ANIM", ta, 10);
                 Log::Step("Revive anim ok");
-                // se o server der controle do ped caido, fallback local seguro
                 Log::Step("Revive check controle");
                 if (MechHasControl(tped)) {
                     Log::Step("Revive aplicando RESURRECT_PED");
@@ -1533,28 +1423,15 @@ namespace C4pt0r::Features
                     Log::Write("Revive no id %d: aplicado com controle.", target);
                 } else {
                     Log::Step("Revive sem controle — fim");
-                    Log::Write("Revive no id %d: sem controle — so os eventos de server.",
-                               target);
+                    Log::Write("Revive no id %d: sem controle do ped — "
+                               "so o servidor pode reanimar de verdade.", target);
                 }
-            }
-        }
-
-        // fila: 1 evento de revive por tick
-        if (s_ReviveSrv > 0) {
-            MsgPack m; m.BeginArray(1); m.Int(s_ReviveSrv);
-            TriggerServer(kReviveEvents[s_ReviveEvIdx], m);
-            if (++s_ReviveEvIdx >=
-                    (int)(sizeof(kReviveEvents) / sizeof(kReviveEvents[0]))) {
-                Log::Write("Revive: eventos de medico disparados pro srvId %d.",
-                           s_ReviveSrv);
-                s_ReviveSrv = -1;
             }
         }
 
         // ---- soltar ----
         if (g_PActions.releaseGrab) {
             g_PActions.releaseGrab = false;
-            GrabFireServerStop();
             GrabDetach();
             uint64_t ct[1] = { (uint64_t)ped };
             CN("CLEAR_PED_SECONDARY_TASK", ct, 1);   // para nossa anim de carry
@@ -1570,7 +1447,6 @@ namespace C4pt0r::Features
             if (!tped) {
                 Log::Write("Grab: id %d sem ped (offline?).", target);
             } else {
-                GrabFireServerStart(target);         // tenta o server primeiro
                 uint64_t ad[2] = { (uint64_t)"missfinale_c2mcs_1", 0 };
                 CN("REQUEST_ANIM_DICT", ad, 1);      // nossa anim de carry
                 s_GrabPed = tped;
@@ -1591,9 +1467,7 @@ namespace C4pt0r::Features
                     // attach local em ped remoto SEM controle = crash
                     // assincrono do jogo (confirmado no dump). Nao faz.
                     s_GrabPed = 0;
-                    Log::Write("Grab: server nao deu controle — cancelado. "
-                               "Os eventos de carry ja foram disparados; "
-                               "se a cidade tiver o resource, ele assume.");
+                    Log::Write("Grab: server nao deu controle — cancelado.");
                 } else if (ctrl) {
                     int bone = 0;
                     uint64_t ba[2] = { (uint64_t)ped, 40269 };   // SKEL_Spine3

@@ -52,8 +52,8 @@ namespace C4pt0r::Log
         strcat_s(g_Path, "c4pt0r_log.txt");
         g_Offset.QuadPart = 0;
         g_File = CreateFileA(g_Path, GENERIC_WRITE,
-            FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr, CREATE_ALWAYS,
-            FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED, nullptr);
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+            CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED, nullptr);
         RawWrite("=== C4pt0r Cheats Log ===\r\n", 28);
     }
 
@@ -94,8 +94,8 @@ namespace C4pt0r::Log
                          st.wHour, st.wMinute, st.wSecond, buf);
         if (g_Path[0] == 0 || n <= 0) return;
         HANDLE h = CreateFileA(g_Path, FILE_APPEND_DATA,
-            FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr, OPEN_ALWAYS,
-            FILE_ATTRIBUTE_NORMAL, nullptr);
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+            OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
         if (h == INVALID_HANDLE_VALUE) return;
         DWORD w = 0;
         WriteFile(h, line, n, &w, nullptr);

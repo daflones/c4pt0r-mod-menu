@@ -216,7 +216,6 @@ namespace C4pt0r
         int   grabId       = -1;     // one-shot: comecar a carregar esse id
         bool  releaseGrab  = false;  // one-shot: soltar quem esta carregado
         bool  grabActive   = false;  // estado — tem alguem carregado (menu le)
-        bool  serverEvents = false;  // disparar TriggerServerEvent? (pode crashar)
     };
 
     // ---------------------------------------------- Armas
