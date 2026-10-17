@@ -237,7 +237,10 @@ namespace C4pt0r
     inline PlayerESPData    g_PlayersData[MAX_PLAYERS] = {};
     inline PlayerListEntry  g_PlayerList[MAX_PLAYERS] = {};
     inline int              g_PlayerListCount = 0;
-    inline std::mutex       g_DataMutex;
+    // timed_mutex + try_lock: um zumbi segurando esse lock (morreu dentro
+    // de um native) nao pode mais matar toda thread nova no lock_guard —
+    // foi isso que criou o loop infinito de respawns mortos
+    inline std::timed_mutex g_DataMutex;
     inline VehicleConfig    g_Vehicle;
     inline FunConfig        g_Fun;
     inline int           g_ScreenWidth  = 1920;

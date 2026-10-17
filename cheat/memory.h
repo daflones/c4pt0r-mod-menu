@@ -97,6 +97,14 @@ namespace C4pt0r::Memory
         return mbi.State == MEM_COMMIT && (mbi.Protect & execMask) != 0;
     }
 
+    // ---- Readable check — validate a pointer before dereferencing a string -
+    inline bool IsReadable(uintptr_t addr) {
+        if (!addr) return false;
+        MEMORY_BASIC_INFORMATION mbi{};
+        if (!VirtualQuery(reinterpret_cast<void*>(addr), &mbi, sizeof(mbi))) return false;
+        return mbi.State == MEM_COMMIT && (mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD)) == 0;
+    }
+
     // ---- RIP-relative address resolution --------------------------------
     // addr         = address of the instruction containing the offset
     // ripOffset    = byte position of the 4-byte relative within the instruction

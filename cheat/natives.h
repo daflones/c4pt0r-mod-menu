@@ -271,6 +271,7 @@ namespace C4pt0r::Natives
     extern std::atomic<uint64_t> g_InvokeHash;  // hash da native em voo (0=idle)
     extern std::atomic<int>      g_InvokePath;  // path em voo: 0 nenhum,1 A,2 B,3 C
     extern std::atomic<int64_t>  g_TickBeat;    // heartbeat do loop de features
+    extern std::atomic<int>      g_TickStage;   // qual sub-tick esta rodando
     void         RetirePath(int path);          // aposenta o path que travou
 
     // Generic by-name invocation — hash computed at runtime (joaat).

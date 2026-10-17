@@ -82,6 +82,7 @@ namespace C4pt0r::Natives
     std::atomic<uint64_t> g_InvokeHash{0};
     std::atomic<int>      g_InvokePath{0};
     std::atomic<int64_t>  g_TickBeat{0};
+    std::atomic<int>      g_TickStage{0};
     static std::atomic<bool> s_BanA{false}, s_BanB{false}, s_BanC{false};
 
     void RetirePath(int path) {
@@ -140,9 +141,10 @@ namespace C4pt0r::Natives
     bool CallNative(uint64_t hash, const uint64_t* args, int nargs,
                     uint64_t* ret)
     {
+        g_InvokeHash = hash;   // antes de TUDO — hang no re-resolve tambem
+                               // fica atribuido ao hash que disparou
         MaybeReResolve();
         bool anyHandler = false;
-        g_InvokeHash = hash;
 
         // Path B: exported scrEngine::GetNativeHandler -> call raw handler
         if (s_RageGNH && !s_BanB) {
@@ -398,18 +400,19 @@ namespace C4pt0r::Natives
         uint64_t h = g_InvokeHash.load();
         if (h) {
             snprintf(buf, len,
-                     "paths[A:%d B:%d C:%d] ok=%llu fail=%llu lastOk=%lldms tick=%lldms | em voo: 0x%llX (path %d)%s",
+                     "paths[A:%d B:%d C:%d] ok=%llu fail=%llu lastOk=%lldms tick=%lldms stage=%d | em voo: 0x%llX (path %d)%s",
                      s_FailA, s_FailB, s_FailC,
                      (unsigned long long)s_OkCount, (unsigned long long)s_FailCount,
-                     MsSinceOk(), tickMs,
+                     MsSinceOk(), tickMs, g_TickStage.load(),
                      (unsigned long long)h, g_InvokePath.load(),
                      s_Ready ? "" : " NOT-READY");
         } else {
             snprintf(buf, len,
-                     "paths[A:%d B:%d C:%d] ok=%llu fail=%llu lastOk=%lldms tick=%lldms%s",
+                     "paths[A:%d B:%d C:%d] ok=%llu fail=%llu lastOk=%lldms tick=%lldms stage=%d%s",
                      s_FailA, s_FailB, s_FailC,
                      (unsigned long long)s_OkCount, (unsigned long long)s_FailCount,
-                     MsSinceOk(), tickMs, s_Ready ? "" : " NOT-READY");
+                     MsSinceOk(), tickMs, g_TickStage.load(),
+                     s_Ready ? "" : " NOT-READY");
         }
     }
 

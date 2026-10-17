@@ -262,13 +262,26 @@ static void MainThread(HMODULE hModule)
         int64_t beat = Natives::g_TickBeat.load();
         int64_t staleMs = beat ? NowMs() - beat : 0;
         if (staleMs > 4000) {
+            // muitos zumbis = o hang e sistemico (mutex preso, lock do
+            // loader...). nao adianta spawnar mais — loga uma vez e para
+            if (s_FeatureThreads.load() >= 8) {
+                static bool warnedCap = false;
+                if (!warnedCap) {
+                    warnedCap = true;
+                    Log::Write("SUPERVISOR: %d feature threads travadas — "
+                               "hang sistemico, parando de respawnar.",
+                               s_FeatureThreads.load());
+                }
+                continue;
+            }
             uint64_t hungHash = Natives::g_InvokeHash.load();
             int      hungPath = Natives::g_InvokePath.load();
             Log::Write("SUPERVISOR: feature loop travado ha %lldms "
-                       "(native 0x%016llX path %d) — aposentando path e "
-                       "respawnando o loop.",
+                       "(native 0x%016llX path %d stage %d) — aposentando "
+                       "path e respawnando o loop.",
                        (long long)staleMs,
-                       (unsigned long long)hungHash, hungPath);
+                       (unsigned long long)hungHash, hungPath,
+                       Natives::g_TickStage.load());
             if (hungPath) Natives::RetirePath(hungPath);
             ++s_FeatureGen;                        // mata o loop velho quando destravar
             Natives::g_TickBeat = NowMs();

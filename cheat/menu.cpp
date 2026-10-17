@@ -9,6 +9,7 @@
 #include "imgui.h"
 
 #include <shellapi.h>
+#include <chrono>
 
 namespace C4pt0r::Menu
 {
@@ -301,8 +302,8 @@ namespace C4pt0r::Menu
         SectionHeader("JOGADORES");
 
         static int s_SelPlayer = -1;
-        {
-            std::lock_guard<std::mutex> lock(g_DataMutex);
+        // try_lock: nunca deixar a thread de render travar no mutex
+        if (g_DataMutex.try_lock_for(std::chrono::milliseconds(10))) {
             ImGui::BeginChild("##plist", ImVec2(0, 120), ImGuiChildFlags_Border);
             if (g_PlayerListCount == 0) {
                 ImGui::TextDisabled("  Nenhum jogador online visivel.");
@@ -318,6 +319,7 @@ namespace C4pt0r::Menu
                     s_SelPlayer = p.id;
             }
             ImGui::EndChild();
+            g_DataMutex.unlock();
         }
 
         if (s_SelPlayer >= 0) {

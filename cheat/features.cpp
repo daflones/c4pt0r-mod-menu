@@ -13,6 +13,7 @@
 
 #include "globals.h"
 #include "natives.h"
+#include "memory.h"
 #include "imgui.h"
 
 #include <cmath>
@@ -673,6 +674,11 @@ namespace C4pt0r::Features
     // ---- Player data collection (throttled — feeds ESP + player list) ----
     //  Always runs so the player list works even with ESP off. WorldToScreen
     //  is only paid for when ESP is actually enabled.
+    //
+    //  CRITICO: natives NUNCA rodam segurando g_DataMutex — se uma chamada
+    //  trava no meio, o mutex ficava preso pra sempre e TODA thread nova
+    //  morria no lock_guard (o ciclo infinito de respawns do log). Coleta
+    //  em arrays locais; o lock so serve pra copiar o resultado.
     static void TickPlayerData()
     {
         static auto last = std::chrono::steady_clock::time_point{};
@@ -687,11 +693,13 @@ namespace C4pt0r::Features
         Vec3 localPos = Natives::GetEntityCoords(localPed);
         bool espOn   = g_ESP.enabled;
 
-        std::lock_guard<std::mutex> lock(g_DataMutex);
+        // coleta local (sem lock)
+        static PlayerESPData   tmpData[MAX_PLAYERS];
+        static PlayerListEntry tmpList[MAX_PLAYERS];
         int count = 0;
 
         for (int i = 0; i < MAX_PLAYERS; ++i) {
-            g_PlayersData[i].active = false;
+            tmpData[i].active = false;
 
             if (i == localPlayer) continue;
             if (!Natives::NetworkIsPlayerActive(i)) continue;
@@ -704,9 +712,16 @@ namespace C4pt0r::Features
             float dist = localPos.Distance(pos);
 
             const char* name = Natives::GetPlayerName(i);
-            char nameBuf[64];
-            if (name) strncpy_s(nameBuf, name, sizeof(nameBuf) - 1);
-            else      snprintf(nameBuf, sizeof(nameBuf), "Player %d", i);
+            char nameBuf[64] = {};
+            bool gotName = false;
+            if (name && Memory::IsReadable(reinterpret_cast<uintptr_t>(name))) {
+                // a string pode cruzar pra uma pagina guard no meio do copy
+                __try {
+                    strncpy_s(nameBuf, name, sizeof(nameBuf) - 1);
+                    gotName = true;
+                } __except (EXCEPTION_EXECUTE_HANDLER) {}
+            }
+            if (!gotName) snprintf(nameBuf, sizeof(nameBuf), "Player %d", i);
             nameBuf[sizeof(nameBuf) - 1] = 0;
 
             int hp    = dead ? 0 : Natives::GetEntityHealth(ped);
@@ -725,7 +740,7 @@ namespace C4pt0r::Features
 
             // player list row (always collected)
             if (count < MAX_PLAYERS) {
-                auto& e = g_PlayerList[count++];
+                auto& e = tmpList[count++];
                 e.id = i; e.ped = ped; e.distance = dist;
                 e.health = hp; e.armor = armor;
                 e.inVehicle = inVeh; e.dead = dead;
@@ -741,7 +756,7 @@ namespace C4pt0r::Features
             Vec2 screen;
             bool onScreen = Natives::WorldToScreen(pos, screen);
 
-            auto& data       = g_PlayersData[i];
+            auto& data       = tmpData[i];
             data.active      = true;
             data.playerId    = i;
             data.ped         = ped;
@@ -757,7 +772,15 @@ namespace C4pt0r::Features
             data.god         = god;
             strncpy_s(data.name, nameBuf, sizeof(data.name) - 1);
         }
-        g_PlayerListCount = count;
+
+        // publica o resultado — lock curto; se um zumbi segurar o mutex,
+        // try_lock_for sai em 50ms em vez de matar a thread
+        if (g_DataMutex.try_lock_for(std::chrono::milliseconds(50))) {
+            memcpy(g_PlayersData, tmpData, sizeof(tmpData));
+            memcpy(g_PlayerList,  tmpList, sizeof(tmpList));
+            g_PlayerListCount = count;
+            g_DataMutex.unlock();
+        }
     }
 
     // ---- Aimbot ---------------------------------------------------------
@@ -993,19 +1016,22 @@ namespace C4pt0r::Features
                        ped, pid, pos.x, pos.y, pos.z);
         }
 
-        TickGodmode();
-        TickInvisible();
-        TickSpeed();
-        TickNoRecoil();
-        TickInfiniteAmmo();
-        TickNoclip();
-        TickTeleport();
-        TickVehicleSpawn();
-        TickFun();
-        TickPlayerData();
-        TickAimbot();
-        TickInspector();
-        TickFarm();
+        // g_TickStage marca o sub-tick em execucao — se a thread travar, o
+        // supervisor loga exatamente onde (stage no HealthString/log)
+        Natives::g_TickStage = 1;  TickGodmode();
+        Natives::g_TickStage = 2;  TickInvisible();
+        Natives::g_TickStage = 3;  TickSpeed();
+        Natives::g_TickStage = 4;  TickNoRecoil();
+        Natives::g_TickStage = 5;  TickInfiniteAmmo();
+        Natives::g_TickStage = 6;  TickNoclip();
+        Natives::g_TickStage = 7;  TickTeleport();
+        Natives::g_TickStage = 8;  TickVehicleSpawn();
+        Natives::g_TickStage = 9;  TickFun();
+        Natives::g_TickStage = 10; TickPlayerData();
+        Natives::g_TickStage = 11; TickAimbot();
+        Natives::g_TickStage = 12; TickInspector();
+        Natives::g_TickStage = 13; TickFarm();
+        Natives::g_TickStage = 0;
     }
 
     // ====================================================================
@@ -1030,7 +1056,9 @@ namespace C4pt0r::Features
         ImU32 hpYellow = IM_COL32(255, 200, 0, 255);
         ImU32 snapCol  = IM_COL32(0, 212, 255, 100);
 
-        std::lock_guard<std::mutex> lock(g_DataMutex);
+        // try_lock: se o mutex estiver preso por um zumbi, pulamos esse
+        // frame em vez de travar a thread de render pra sempre
+        if (!g_DataMutex.try_lock_for(std::chrono::milliseconds(10))) return;
 
         ImU32 godCol = ImGui::ColorConvertFloat4ToU32(
             ImVec4(g_ESP.godColor[0], g_ESP.godColor[1], g_ESP.godColor[2], g_ESP.godColor[3]));
@@ -1138,5 +1166,6 @@ namespace C4pt0r::Features
                     snapCol, 1.0f);
             }
         }
+        g_DataMutex.unlock();
     }
 }
