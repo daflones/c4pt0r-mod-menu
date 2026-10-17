@@ -64,11 +64,25 @@ try {
     if (Test-Path $tmpDir) { Remove-Item $tmpDir -Recurse -Force }
     Expand-Archive -Path $tmpZip -DestinationPath $tmpDir -Force
 
-    # Copia arquivos novos por cima da instalacao (nao apaga configs do usuario)
-    Get-ChildItem -Path $tmpDir -Recurse -File | ForEach-Object {
-        $rel = $_.FullName.Substring($tmpDir.Length).TrimStart('\')
+    # Se o zip veio com uma pasta-raiz dentro, desce nela
+    $srcDir = $tmpDir
+    $top = Get-ChildItem -Path $tmpDir -Force
+    if (($top | Where-Object { -not $_.PSIsContainer }).Count -eq 0 -and $top.Count -eq 1) {
+        $srcDir = $top[0].FullName
+    }
+
+    # Copia arquivos novos por cima da instalacao (cria pastas se faltarem,
+    # pula arquivos em uso como o proprio updater)
+    Get-ChildItem -Path $srcDir -Recurse -File | ForEach-Object {
+        $rel = $_.FullName.Substring($srcDir.Length).TrimStart('\')
         $dst = Join-Path $InstallDir $rel
-        Copy-Item $_.FullName $dst -Force
+        $dstDir = Split-Path -Parent $dst
+        if (-not (Test-Path $dstDir)) { New-Item -ItemType Directory -Force -Path $dstDir | Out-Null }
+        try {
+            Copy-Item $_.FullName $dst -Force -ErrorAction Stop
+        } catch {
+            Write-Line "  [..] Pulando (em uso): $rel" 'DarkYellow'
+        }
     }
 } catch {
     Write-Line "  [ERRO] Falha ao instalar: $_" 'Red'
