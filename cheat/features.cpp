@@ -29,6 +29,8 @@ constexpr float DEG2RAD = PI / 180.0f;
 namespace C4pt0r::Features
 {
     static uint64_t FA(float f);   // fwd — definida junto do CN() mais abaixo
+    static bool CN(const char* n, const uint64_t* a = nullptr, int c = 0,
+                   uint64_t* r = nullptr);
 
     // ====================================================================
     //  Tick — called from main thread, safe to use natives
@@ -159,7 +161,8 @@ namespace C4pt0r::Features
     static Vec3  s_TpTarget{};
     static Vec3  s_TpStart{};
     static int   s_TpTries  = 0;
-    static int   s_TpProbe  = 0;   // shape test handle (plano B do ground Z)
+    static float s_TpLastZ  = 0.f;
+    static int   s_TpStill  = 0;
 
     static void SceneLoad(float x, float y, float z) {
         uint64_t a[5];
@@ -174,37 +177,6 @@ namespace C4pt0r::Features
         Natives::CallByName("NEW_LOAD_SCENE_STOP", nullptr, 0, nullptr);
     }
 
-    // ---- Shape test: raycast pra baixo quando GET_GROUND_Z nao resolve ----
-    static int StartShapeTest(float x, float y, float zTop, float zBot) {
-        uint64_t a[9];
-        a[0] = FA(x); a[1] = FA(y); a[2] = FA(zTop);
-        a[3] = FA(x); a[4] = FA(y); a[5] = FA(zBot);
-        a[6] = 1 | 16;              // world + peds-as-blocking flags
-        a[7] = 0;                   // ignore entity
-        a[8] = 7;
-        uint64_t r[4] = {};
-        if (Natives::CallByName("START_EXPENSIVE_SYNCHRONOUS_SHAPE_TEST_LOS_PROBE",
-                                a, 9, r) && r[0])
-            return static_cast<int>(r[0]);
-        return 0;
-    }
-    // retorna 2 quando terminou (outZ valido se hit), 0 esperando, -1 erro
-    static int ReadShapeTest(int handle, float& outZ, bool& hit) {
-        float ec[4] = {}, norm[4] = {};
-        uint64_t ent = 0, didHit = 0;
-        uint64_t a[5];
-        a[0] = static_cast<uint64_t>(handle);
-        a[1] = reinterpret_cast<uint64_t>(&didHit);
-        a[2] = reinterpret_cast<uint64_t>(ec);
-        a[3] = reinterpret_cast<uint64_t>(norm);
-        a[4] = reinterpret_cast<uint64_t>(&ent);
-        uint64_t r[4] = {};
-        if (!Natives::CallByName("GET_SHAPE_TEST_RESULT", a, 5, r)) return -1;
-        if (r[0] == 2) { hit = didHit != 0; if (hit) outZ = ec[2]; return 2; }
-        if (r[0] == 0) return 0;
-        return -1;
-    }
-
     static void BeginTeleport(int ped, float x, float y, float z) {
         if (s_TpBusy) return;
         int veh = Natives::IsPedInAnyVehicle(ped) ? Natives::GetVehiclePedIsIn(ped) : 0;
@@ -216,7 +188,6 @@ namespace C4pt0r::Features
         SceneLoad(x, y, z);
         s_TpTarget = { x, y, z };
         s_TpTries  = 0;
-        s_TpProbe  = 0;
         s_TpBusy   = true;
         Log::Write("TP: voando para %.1f, %.1f (carregando area...)", x, y);
     }
@@ -236,49 +207,41 @@ namespace C4pt0r::Features
             g_Teleport.savedZ = pos.z;
         }
 
-        // --- staged TP in flight: probe ground until it resolves ---
+        // --- staged TP in flight ---
+        //  GET_GROUND_Z e os shape-tests nao existem nesse build — entao o
+        //  pouso e por QUEDA LIVRE: stream a area, solta, e observa o Z
+        //  estabilizar (= encostou em algo solido). void/timeout aborta
+        //  pro ponto de partida.
         if (s_TpBusy) {
-            float gz = 0;
-            bool got = Natives::GetGroundZ(s_TpTarget.x, s_TpTarget.y,
-                                           s_TpTarget.z + 300.f, gz);
+            ++s_TpTries;
 
-            // plano B: raycast pra baixo (GET_GROUND_Z nao existe nesse build)
-            if (!got) {
-                ++s_TpTries;
-                if (!s_TpProbe && s_TpTries > 20) {
-                    s_TpProbe = StartShapeTest(s_TpTarget.x, s_TpTarget.y,
-                                               s_TpTarget.z + 500.f,
-                                               s_TpTarget.z - 300.f);
-                }
-                if (s_TpProbe) {
-                    bool hit = false;
-                    int st = ReadShapeTest(s_TpProbe, gz, hit);
-                    if (st == 2) {
-                        if (hit) got = true;
-                        else s_TpProbe = 0;      // terminou sem hit — tenta outro depois
-                    } else if (st < 0) {
-                        s_TpProbe = 0;           // handle invalido — desiste
-                    }
-                }
+            if (s_TpTries == 45) {          // ~700ms de stream primeiro
+                Natives::FreezeEntityPosition(s_TpEnt, false);
+                s_TpLastZ = 1e9f;
+                s_TpStill = 0;
+                Log::Write("TP: soltando — pousando no chao real.");
             }
+            else if (s_TpTries > 45) {
+                Vec3 p = Natives::GetEntityCoords(s_TpEnt);
+                bool stopped = (p.z >= s_TpLastZ - 0.05f);   // parou de cair
+                s_TpLastZ = p.z;
+                if (stopped) ++s_TpStill; else s_TpStill = 0;
 
-            if (got) {
-                Natives::SetEntityCoordsNoOffset(s_TpEnt, s_TpTarget.x, s_TpTarget.y, gz + 0.5f);
-                Natives::FreezeEntityPosition(s_TpEnt, false);
-                SceneStop();
-                s_TpBusy = false;
-                s_TpProbe = 0;
-                Log::Write("TP: pousou em %.1f, %.1f, %.1f",
-                           s_TpTarget.x, s_TpTarget.y, gz);
-            } else if (s_TpTries > 500) {   // ~8s — NUNCA pousa no Z bruto
-                // (foi o que crashava: cair no void). volta pro ponto seguro.
-                Natives::SetEntityCoordsNoOffset(s_TpEnt, s_TpStart.x, s_TpStart.y,
-                                                 s_TpStart.z + 0.5f);
-                Natives::FreezeEntityPosition(s_TpEnt, false);
-                SceneStop();
-                s_TpBusy = false;
-                s_TpProbe = 0;
-                Log::Write("TP: ground Z indisponivel — abortado, voltou pro inicio.");
+                if (s_TpStill >= 3) {       // ~3 ticks estavel = pousou
+                    SceneStop();
+                    s_TpBusy = false;
+                    Log::Write("TP: pousou em %.1f, %.1f, %.1f",
+                               p.x, p.y, p.z);
+                } else if (p.z < -60.f || s_TpTries > 1200) {
+                    // void/timeout — volta pro inicio, NUNCA pousa a ceu aberto
+                    Natives::FreezeEntityPosition(s_TpEnt, true);
+                    Natives::SetEntityCoordsNoOffset(s_TpEnt, s_TpStart.x,
+                        s_TpStart.y, s_TpStart.z + 0.5f);
+                    Natives::FreezeEntityPosition(s_TpEnt, false);
+                    SceneStop();
+                    s_TpBusy = false;
+                    Log::Write("TP: falhou — voltou pro ponto de partida.");
+                }
             }
         }
 
@@ -346,7 +309,10 @@ namespace C4pt0r::Features
     {
         if (g_Vehicle.spawn) {
             g_Vehicle.spawn = false;
-            uint32_t m = Natives::GetHashKey(g_Vehicle.model);
+            uint32_t m = g_Vehicle.modelHash
+                         ? g_Vehicle.modelHash
+                         : Natives::GetHashKey(g_Vehicle.model);
+            g_Vehicle.modelHash = 0;
             if (!m) {
                 Log::Write("Veiculo: modelo '%s' invalido.", g_Vehicle.model);
                 return;
@@ -378,6 +344,26 @@ namespace C4pt0r::Features
         int veh = Natives::CreateVehicle(s_VModel, spawnAt.x, spawnAt.y, spawnAt.z, head);
         if (veh) {
             Natives::SetVehicleOnGroundProperly(veh);
+            // cor guardada na garagem — aplica logo depois do spawn
+            if (g_Vehicle.postPrim >= 0 || g_Vehicle.postSec >= 0) {
+                uint64_t a[3] = { (uint64_t)veh,
+                    (uint64_t)(g_Vehicle.postPrim < 0 ? 0 : g_Vehicle.postPrim),
+                    (uint64_t)(g_Vehicle.postSec  < 0 ? 0 : g_Vehicle.postSec) };
+                CN("SET_VEHICLE_COLOURS", a, 3);
+            }
+            if (g_Vehicle.postCustom) {
+                auto c255 = [](float v) { return (uint64_t)(v * 255.f); };
+                uint64_t a[4] = { (uint64_t)veh, c255(g_Vehicle.postPrimRgb[0]),
+                                  c255(g_Vehicle.postPrimRgb[1]),
+                                  c255(g_Vehicle.postPrimRgb[2]) };
+                CN("SET_VEHICLE_CUSTOM_PRIMARY_COLOUR", a, 4);
+                a[1] = c255(g_Vehicle.postSecRgb[0]);
+                a[2] = c255(g_Vehicle.postSecRgb[1]);
+                a[3] = c255(g_Vehicle.postSecRgb[2]);
+                CN("SET_VEHICLE_CUSTOM_SECONDARY_COLOUR", a, 4);
+            }
+            g_Vehicle.postPrim = g_Vehicle.postSec = -1;
+            g_Vehicle.postCustom = false;
             if (g_Vehicle.warpIn)
                 Natives::SetPedIntoVehicle(ped, veh, -1);
             Log::Write("Veiculo spawnado: %s (id %d)", g_Vehicle.model, veh);
@@ -391,8 +377,8 @@ namespace C4pt0r::Features
     // ---- Fun / world features ---------------------------------------------
     //  All natives invoked by name (joaat at runtime) — a native that doesn't
     //  exist on this build just returns false, nothing crashes.
-    static bool CN(const char* n, const uint64_t* a = nullptr, int c = 0,
-                   uint64_t* r = nullptr) {
+    static bool CN(const char* n, const uint64_t* a, int c,
+                   uint64_t* r) {
         return Natives::CallByName(n, a, c, r);
     }
     static uint64_t FA(float f) {          // float arg packed into u64 slot
@@ -750,6 +736,53 @@ namespace C4pt0r::Features
         return veh;
     }
 
+    //  Mexer em veiculo REMOTO (de outro player) crashava o cliente —
+    //  so aplica quando a gente tem controle da entidade. Se nao tem,
+    //  pede e tenta de novo no proximo tick.
+    static int s_MechCtrlTries = 0;
+    static bool MechHasControl(int veh)
+    {
+        uint64_t a[1] = { (uint64_t)veh };
+        uint64_t r[4] = {};
+        if (CN("DOES_ENTITY_EXIST", a, 1, r) && !r[0]) return false;
+        memset(r, 0, sizeof(r));
+        if (CN("NETWORK_HAS_CONTROL_OF_ENTITY", a, 1, r) && r[0]) return true;
+        CN("NETWORK_REQUEST_CONTROL_OF_ENTITY", a, 1, nullptr);
+        return false;
+    }
+
+    static void MechSaveToGarage(int veh)
+    {
+        GarageEntry e{};
+        uint64_t a[1] = { (uint64_t)veh };
+        uint64_t r[4] = {};
+        if (CN("GET_ENTITY_MODEL", a, 1, r)) e.model = (uint32_t)r[0];
+        int pr = -1, se = -1;
+        uint64_t ca[3] = { (uint64_t)veh, (uint64_t)&pr, (uint64_t)&se };
+        if (CN("GET_VEHICLE_COLOURS", ca, 3)) { e.prim = pr; e.sec = se; }
+        int cr = -1, cg = -1, cb = -1;
+        uint64_t cc[4] = { (uint64_t)veh, (uint64_t)&cr,
+                           (uint64_t)&cg, (uint64_t)&cb };
+        if (CN("GET_VEHICLE_CUSTOM_PRIMARY_COLOUR", cc, 4) && cr >= 0) {
+            e.custom = true;
+            e.primRgb[0] = cr / 255.f; e.primRgb[1] = cg / 255.f;
+            e.primRgb[2] = cb / 255.f;
+            cr = cg = cb = -1;
+            uint64_t cd[4] = { (uint64_t)veh, (uint64_t)&cr,
+                               (uint64_t)&cg, (uint64_t)&cb };
+            CN("GET_VEHICLE_CUSTOM_SECONDARY_COLOUR", cd, 4);
+            e.secRgb[0] = (cr >= 0 ? cr : 0) / 255.f;
+            e.secRgb[1] = (cg >= 0 ? cg : 0) / 255.f;
+            e.secRgb[2] = (cb >= 0 ? cb : 0) / 255.f;
+        }
+        snprintf(e.name, sizeof(e.name), "Veiculo 0x%08X", e.model);
+        {
+            std::lock_guard<std::mutex> lk(g_GarageMtx);
+            g_Garage.push_back(e);
+        }
+        Log::Write("Garagem: %s guardado.", e.name);
+    }
+
     static void MechApplyMods(int veh)
     {
         uint64_t kit[2] = { (uint64_t)veh, 0 };
@@ -829,11 +862,20 @@ namespace C4pt0r::Features
     static void TickMechanic()
     {
         bool any = g_Mech.applyMods | g_Mech.applyColors | g_Mech.applyExtras |
-                   g_Mech.applyPower | g_Mech.plate;
+                   g_Mech.applyPower | g_Mech.plate | g_Mech.saveGarage;
         if (!any) return;
         int ped = Natives::PlayerPedId();
         int veh = ped ? MechTargetVeh(ped) : 0;
+        if (veh && !MechHasControl(veh)) {
+            if (++s_MechCtrlTries < 60) return;   // ~1s pedindo controle
+            s_MechCtrlTries = 0;
+            veh = 0;
+            Log::Write("Mecanico: sem controle do veiculo (de outro player?) — cancelado.");
+        } else {
+            s_MechCtrlTries = 0;
+        }
         if (veh) {
+            if (g_Mech.saveGarage) MechSaveToGarage(veh);
             if (g_Mech.applyMods)   MechApplyMods(veh);
             if (g_Mech.applyColors) MechApplyColors(veh);
             if (g_Mech.applyExtras) MechApplyExtras(veh);
@@ -853,7 +895,7 @@ namespace C4pt0r::Features
             }
         }
         g_Mech.applyMods = g_Mech.applyColors = g_Mech.applyExtras = false;
-        g_Mech.applyPower = g_Mech.plate = false;
+        g_Mech.applyPower = g_Mech.plate = g_Mech.saveGarage = false;
     }
 
     // ---- Armas -------------------------------------------------------------
@@ -946,7 +988,7 @@ namespace C4pt0r::Features
     {
         static auto last = std::chrono::steady_clock::time_point{};
         auto now = std::chrono::steady_clock::now();
-        if (now - last < std::chrono::milliseconds(150)) return;
+        if (now - last < std::chrono::milliseconds(250)) return;
         last = now;
 
         int localPed = Natives::PlayerPedId();
@@ -1323,7 +1365,7 @@ namespace C4pt0r::Features
         int64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now().time_since_epoch()).count();
         int64_t prev = s_LastTick.load();
-        if (now - prev < 12) return;
+        if (now - prev < 30) return;   // ~33Hz — cheat nao precisa 80fps
         if (!s_LastTick.compare_exchange_strong(prev, now)) return;
         if (s_InTick.exchange(true)) return;      // outro driver no tick
 

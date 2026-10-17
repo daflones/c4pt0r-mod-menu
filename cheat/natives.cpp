@@ -450,27 +450,22 @@ namespace C4pt0r::Natives
     }
 
     // ---- Vec3-returning natives ------------------------------------------
-    //  Convencao FiveM: natives que retornam Vector3 recebem um Vector3*
-    //  como ULTIMO arg — o handler escreve o vetor la, nao no returnValue.
-    //  Sem o out-ptr ele escreve num slot de arg lixo = 12-24 bytes num
-    //  endereco aleatorio. Era a corrupcao que crashava o jogo depois de
-    //  "um tempo usando" (GetEntityCoords roda ~60x/s por todas as feats).
-    //  O decode "y sempre 0, z estranho" era o ret[] lendo lixo.
+    //  scrVector3 no ABI do FiveM = {x, _pad, y, _pad, z, _pad} — pads sao
+    //  sempre 0. O handler escreve isso no returnValue (ret[]). O bug: o
+    //  decode antigo lia packed {f0,f1,f2} = (x, pad=0, y) — era o "y=0"
+    //  fantasma, e o out-ptr extra ficava zerado. Decodifica certo agora.
     static Vec3 CallVec3(uint64_t hash, const uint64_t* args, int nargs)
     {
-        alignas(16) float vec[8] = {};   // cobre packed E scrVector3 padded
-        uint64_t a[12] = {};
-        for (int i = 0; i < nargs && i < 11; ++i) a[i] = args[i];
-        a[nargs] = reinterpret_cast<uint64_t>(vec);
         uint64_t ret[4] = {};
-        if (!CallNative(hash, a, nargs + 1, ret)) {
+        if (!CallNative(hash, args, nargs, ret)) {
             LogMissingHash(hash);
             return {};
         }
-        // scrVector3 padded = {x,_,y,_,z,_}: pads sao sempre 0.
-        if (vec[1] == 0.f && vec[3] == 0.f && (vec[2] != 0.f || vec[4] != 0.f))
-            return Vec3(vec[0], vec[2], vec[4]);
-        return Vec3(vec[0], vec[1], vec[2]);   // packed {x,y,z}
+        auto* f = reinterpret_cast<float*>(ret);
+        // padded scrVector3: f1/f3 sao zero. packed {x,y,z}: f3=prox dado.
+        if (f[1] == 0.f && f[3] == 0.f && (f[2] != 0.f || f[4] != 0.f))
+            return Vec3(f[0], f[2], f[4]);
+        return Vec3(f[0], f[1], f[2]);
     }
 
     Vec3 InvokeVec3(uint64_t hash, uint64_t arg0, uint64_t arg1, int explicitN)

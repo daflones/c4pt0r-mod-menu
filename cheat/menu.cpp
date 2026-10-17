@@ -548,6 +548,34 @@ namespace C4pt0r::Menu
         if (ImGui::Button("Consertar / limpar", ImVec2(-1, 30))) g_Fun.repairVeh = true;
         if (ImGui::Button("Virar pra cima",     ImVec2(-1, 30))) g_Fun.flipVeh = true;
         if (ImGui::Button("TURBO +35 m/s",      ImVec2(-1, 30))) g_Fun.boostVeh = true;
+
+        SectionHeader("GARAGEM");
+        if (ImGui::Button("GUARDAR VEICULO ALVO", ImVec2(-1, 30)))
+            g_Mech.saveGarage = true;
+        Tooltip("Guarda o veiculo alvo (seu ou o mais proximo) com modelo e cores — respawna depois.");
+        {
+            std::lock_guard<std::mutex> lk(g_GarageMtx);
+            if (g_Garage.empty())
+                ImGui::TextDisabled("Garagem vazia — guarda um veiculo primeiro.");
+            for (int i = 0; i < (int)g_Garage.size(); ++i) {
+                const auto& e = g_Garage[i];
+                ImGui::PushID(i);
+                ImGui::TextDisabled("%s", e.name);
+                ImGui::SameLine();
+                ImGui::SetCursorPosX(ImGui::GetContentRegionAvail().x - 70);
+                if (ImGui::Button("SPAWNAR")) {
+                    g_Vehicle.modelHash = e.model;
+                    g_Vehicle.postPrim = e.prim;
+                    g_Vehicle.postSec  = e.sec;
+                    g_Vehicle.postCustom = e.custom;
+                    memcpy(g_Vehicle.postPrimRgb, e.primRgb, sizeof(e.primRgb));
+                    memcpy(g_Vehicle.postSecRgb,  e.secRgb,  sizeof(e.secRgb));
+                    g_Vehicle.spawn = true;
+                }
+                ImGui::PopID();
+            }
+        }
+        ImGui::TextDisabled("Garagem local — vale enquanto o jogo esta aberto.");
     }
 
     // ---- Armas -------------------------------------------------------------

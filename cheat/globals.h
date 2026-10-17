@@ -101,6 +101,23 @@ namespace C4pt0r
         bool  spawn    = false;     // one-shot flag
         bool  warpIn   = true;      // enter vehicle after spawn
         char  model[48] = {};
+        uint32_t modelHash = 0;     // >0 = spawna por hash (garagem)
+        // cor aplicada no veiculo logo depois do spawn (-1 = nao mexer)
+        int   postPrim = -1, postSec = -1;
+        bool  postCustom = false;
+        float postPrimRgb[3] = {};
+        float postSecRgb[3]  = {};
+    };
+
+    // Garagem local: guarda o veiculo alvo (modelo + cores) pra respawnar.
+    // Nao e a garagem do server — e a sua lista de carros salvos.
+    struct GarageEntry {
+        char     name[32] = {};
+        uint32_t model    = 0;
+        int      prim = -1, sec = -1;
+        bool     custom = false;
+        float    primRgb[3] = {};
+        float    secRgb[3]  = {};
     };
 
     // ---------------------------------------------- Mundo / diversao
@@ -151,6 +168,7 @@ namespace C4pt0r
         bool  applyExtras  = false;   // perolado/roda/fumaca/neon/vidro
         bool  applyPower   = false;   // multiplicadores de motor/torque
         bool  plate        = false;   // aplica texto da placa
+        bool  saveGarage   = false;   // guarda o veiculo alvo na garagem
         char  plateText[16] = {};
 
         // performance / mods (slot LSC) — -1 = nao aplicar
@@ -302,6 +320,8 @@ namespace C4pt0r
     inline FunConfig        g_Fun;
     inline MechanicConfig   g_Mech;
     inline WeaponConfig     g_Weapon;
+    inline std::vector<GarageEntry> g_Garage;
+    inline std::mutex               g_GarageMtx;
     inline int           g_ScreenWidth  = 1920;
     inline int           g_ScreenHeight = 1080;
     // setado pelo MainThread quando o init de natives termina (ok ou nao) —
