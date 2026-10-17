@@ -49,6 +49,8 @@ namespace C4pt0r::LuaExec
     static char       s_Status[96] = "invoker: procurando exports";
 
     static ScriptErrorFn s_OrigScriptError = nullptr;
+    static FARPROC       s_ScriptErrorAddr = nullptr;
+    static bool          s_ErrHooked = false;
     static jmp_buf       s_Jb;
     static __declspec(thread) int s_OurCall = 0;
 
@@ -97,16 +99,8 @@ namespace C4pt0r::LuaExec
             return;
         }
 
-        FARPROC se = GetProcAddress(core,
+        s_ScriptErrorAddr = GetProcAddress(core,
             "?ScriptError@ScriptNativeContext@invoker@fx@@QEBAXPEBD@Z");
-        if (se) {
-            MH_Initialize();
-            if (MH_CreateHook((void*)se, (void*)hk_ScriptError,
-                              (void**)&s_OrigScriptError) == MH_OK &&
-                MH_EnableHook((void*)se) == MH_OK) {
-                Log::Write("LuaExec: ScriptError neutered.");
-            }
-        }
         s_Ok = true;
         snprintf(s_Status, sizeof(s_Status), "server events: pronto");
         Log::Write("LuaExec: invoker CFX ok (FromHash=0x%p Invoke=0x%p).",
@@ -121,10 +115,36 @@ namespace C4pt0r::LuaExec
     static bool CallFx(uint64_t hash, uintptr_t* args, FxArgType* types,
                        int nargs, uintptr_t* ret)
     {
+        if (!s_ErrHooked && s_ScriptErrorAddr) {
+            s_ErrHooked = true;
+            MH_Initialize();
+            if (MH_CreateHook((void*)s_ScriptErrorAddr, (void*)hk_ScriptError,
+                              (void**)&s_OrigScriptError) == MH_OK &&
+                MH_EnableHook((void*)s_ScriptErrorAddr) == MH_OK) {
+                Log::Write("LuaExec: ScriptError neutered.");
+            }
+        }
+
         const void* info = nullptr;
         __try { info = s_FromHash(hash); }
         __except (EXCEPTION_EXECUTE_HANDLER) { info = nullptr; }
         if (!info) return false;
+
+        const uint8_t* h = (const uint8_t*)info;
+        __try {
+            if (*(const uint64_t*)h != hash) return false;
+            void* scr = *(void**)(h + 24);
+            void* fx  = *(void**)(h + 32);
+            if (scr) {
+                Log::Write("LuaExec: hash 0x%llX colidiu na registry GTA5 — ignorado.", hash);
+                return false;
+            }
+            if (!fx) {
+                Log::Write("LuaExec: hash 0x%llX sem handler CFX.", hash);
+                return false;
+            }
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) { return false; }
 
         FxCtx ctx;
         memset(&ctx, 0, sizeof(ctx));
