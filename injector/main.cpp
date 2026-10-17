@@ -48,6 +48,7 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(
 static const char* SUPA_HOST = "bzthdklqvjtutkeiimpq.supabase.co";
 static const char* ANON_KEY  = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJ6dGhka2xxdmp0dXRrZWlpbXBxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTIxNzU2MDYsImV4cCI6MjEwNzc1MTYwNn0.K1_us_hjL10yynZRDsrWZKwId-l5NuzrDSuHeFXtIdI";
 static const wchar_t* DISCORD_URL = L"https://discord.gg/PhkbhxMBy";
+static const wchar_t* YOUTUBE_URL = L"https://www.youtube.com/channel/UCX5aJEgyvTqUyR4awSAx8ig/";
 
 // ---- D3D11 -----------------------------------------------------------------
 static ID3D11Device*           g_pd3dDevice  = nullptr;
@@ -903,8 +904,11 @@ static void ScreenLogin() {
     }
 
     ImGui::SetCursorPosY(ImGui::GetWindowHeight() - 56);
-    GhostBtn("SUPORTE NO DISCORD", -1, 34);
+    GhostBtn("SUPORTE NO DISCORD", ImGui::GetContentRegionAvail().x * 0.5f - 4, 34);
     if (ImGui::IsItemClicked()) ShellExecuteW(nullptr, L"open", DISCORD_URL, nullptr, nullptr, SW_SHOW);
+    ImGui::SameLine(0, 8);
+    GhostBtn("CANAL NO YOUTUBE", -1, 34);
+    if (ImGui::IsItemClicked()) ShellExecuteW(nullptr, L"open", YOUTUBE_URL, nullptr, nullptr, SW_SHOW);
 }
 
 static void ScreenSignup() {
@@ -1214,10 +1218,13 @@ static void ScreenMain() {
     NavTab("  MINHA CONTA", 1);
 
     // rodape da sidebar
-    float remain = ImGui::GetContentRegionAvail().y - 78;
+    float remain = ImGui::GetContentRegionAvail().y - 112;
     if (remain > 0) ImGui::Dummy(ImVec2(0, remain));
     if (GhostBtn("DISCORD", -1, 32))
         ShellExecuteW(nullptr, L"open", DISCORD_URL, nullptr, nullptr, SW_SHOW);
+    ImGui::Dummy(ImVec2(0, 2));
+    if (GhostBtn("YOUTUBE", -1, 32))
+        ShellExecuteW(nullptr, L"open", YOUTUBE_URL, nullptr, nullptr, SW_SHOW);
     ImGui::Dummy(ImVec2(0, 2));
     if (GhostBtn("SAIR", -1, 32)) {
         ClearSession();

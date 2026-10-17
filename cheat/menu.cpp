@@ -773,7 +773,8 @@ namespace C4pt0r::Menu
         SectionHeader("COMUNIDADE");
         LinkButton("Discord  —  discord.gg/PhkbhxMBy",
                    "https://discord.gg/PhkbhxMBy", -1);
-        LinkButton("YouTube  —  C4pt0r - Mods (em breve)", nullptr, -1);
+        LinkButton("YouTube  —  Mr.R0b0t - C4pt0r Dev",
+                   "https://www.youtube.com/channel/UCX5aJEgyvTqUyR4awSAx8ig/", -1);
 
         SectionHeader("INFO");
         ImGui::TextDisabled("C4pt0r Cheats v1.7");
@@ -829,7 +830,7 @@ namespace C4pt0r::Menu
         if (remain > 0) ImGui::Dummy(ImVec2(0, remain));
         ImGui::Separator();
         LinkButton("Discord", "https://discord.gg/PhkbhxMBy", tabW);
-        LinkButton("YouTube (breve)", nullptr, tabW);
+        LinkButton("YouTube", "https://www.youtube.com/channel/UCX5aJEgyvTqUyR4awSAx8ig/", tabW);
 
         ImGui::EndChild();
         ImGui::SameLine();
