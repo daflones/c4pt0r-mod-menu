@@ -197,7 +197,8 @@ namespace C4pt0r
     };
 
     struct LuaConfig {
-        char  code[8192] = "";
+        char  eventName[96] = "";
+        int   eventArg      = -1;
         bool  run        = false;
         int   preset     = 0;
         int   targetId   = -1;

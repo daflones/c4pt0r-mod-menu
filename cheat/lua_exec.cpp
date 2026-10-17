@@ -1,154 +1,167 @@
-
-
 #include "lua_exec.h"
 #include "logger.h"
-#include "deps/minhook/include/MinHook.h"
 #include <Windows.h>
 #include <cstring>
 #include <cstdint>
-#include <atomic>
+#include <cstdlib>
 
 namespace C4pt0r::LuaExec
 {
+    struct FxArgType {
+        uint32_t Size : 29;
+        uint32_t IsIsolated : 1;
+        uint32_t IsString : 1;
+        uint32_t IsPointer : 1;
+    };
 
-    typedef void* lua_State;
-    typedef int (*lua_CFunction)(lua_State*);
-    typedef int (*lua_resume_fn)(lua_State*, lua_State*, int, int*);
-    typedef int (*lua_pcallk_fn)(lua_State*, int, int, int, intptr_t, lua_CFunction);
-    typedef int (*lua_call_fn)(lua_State*, int, int);
-    typedef int (*luaL_loadbufferx_fn)(lua_State*, const char*, size_t,
-                                     const char*, const char*);
-    typedef int (*luaL_loadstring_fn)(lua_State*, const char*);
-    typedef const char* (*lua_tostring_fn)(lua_State*, int);
-    typedef void (*lua_settop_fn)(lua_State*, int);
+    struct FxIsoBuf {
+        size_t Size;
+        uint8_t* SafeBuffer;
+        uint8_t* NativeBuffer;
+    };
 
-    static HMODULE            s_Dll       = nullptr;
-    static std::atomic<lua_State*> s_State{nullptr};
-    static luaL_loadbufferx_fn s_LoadBuf  = nullptr;
-    static luaL_loadstring_fn  s_LoadStr  = nullptr;
-    static lua_pcallk_fn       s_Pcallk   = nullptr;
-    static lua_tostring_fn     s_ToString = nullptr;
-    static lua_settop_fn       s_SetTop   = nullptr;
-    static char                s_Status[96] = "lua: procurando dll";
-    static bool                s_InitDone = false;
-    static int                 s_InitTries = 0;
+    struct FxCtx {
+        const void* info;
+        uintptr_t   arguments[32];
+        FxArgType   types[32];
+        size_t      numArguments;
+        bool        trivial;
+        uint8_t*    isolatedBuffer;
+        uint8_t*    isolatedBufferEnd;
+        uintptr_t   results[4];
+        void*       retvals[16];
+        uint8_t     rettypes[16];
+        size_t      numReturnValues;
+        FxIsoBuf    isolatedBuffers[8];
+        size_t      numIsolatedBuffers;
+    };
 
-    static lua_resume_fn s_OrigResume = nullptr;
-    static lua_pcallk_fn s_OrigPcallk = nullptr;
-    static lua_call_fn   s_OrigCall   = nullptr;
+    using FromHashFn = const void* (__cdecl*)(uint64_t hash);
+    using InvokeFn   = void (__fastcall*)(FxCtx* ctx);
 
-    static int hk_resume(lua_State* L, lua_State* from, int nargs, int* nres)
+    static FromHashFn s_FromHash = nullptr;
+    static InvokeFn   s_Invoke   = nullptr;
+    static bool       s_Ok       = false;
+    static int        s_Tries    = 0;
+    static char       s_Status[96] = "invoker: procurando exports";
+
+    static uint64_t JoaatHash(const char* s)
     {
-        if (L) s_State.store(L, std::memory_order_relaxed);
-        return s_OrigResume(L, from, nargs, nres);
-    }
-    static int hk_pcallk(lua_State* L, int na, int nr, int ef,
-                         intptr_t ctx, lua_CFunction k)
-    {
-        if (L) s_State.store(L, std::memory_order_relaxed);
-        return s_OrigPcallk(L, na, nr, ef, ctx, k);
-    }
-    static int hk_call(lua_State* L, int nargs, int nresults)
-    {
-        if (L) s_State.store(L, std::memory_order_relaxed);
-        return s_OrigCall(L, nargs, nresults);
-    }
-
-    static void HookSym(HMODULE dll, const char* name, void* hk, void** orig)
-    {
-        FARPROC fp = GetProcAddress(dll, name);
-        if (!fp) return;
-        if (MH_CreateHook(reinterpret_cast<void*>(fp), hk, orig) == MH_OK &&
-            MH_EnableHook(reinterpret_cast<void*>(fp)) == MH_OK) {
-            Log::Write("LuaExec: hook %s ok.", name);
+        uint32_t h = 0;
+        while (*s) {
+            char c = *s++;
+            if (c >= 'A' && c <= 'Z') c += 32;
+            h = (h + (uint8_t)c) & 0xFFFFFFFF;
+            h = (h + (h << 10)) & 0xFFFFFFFF;
+            h = h ^ (h >> 6);
         }
+        h = (h + (h << 3)) & 0xFFFFFFFF;
+        h = h ^ (h >> 11);
+        h = (h + (h << 15)) & 0xFFFFFFFF;
+        return h & 0xFFFFFFFFull;
     }
 
     void Init()
     {
-        if (s_State.load()) return;
-        if (s_InitDone && s_Dll) return;
-        if (++s_InitTries > 200) return;
+        if (s_Ok || ++s_Tries > 50) return;
 
-        if (!s_Dll) {
-            static const wchar_t* kDlls[] = {
-                L"citizen-scripting-lua.dll",
-                L"citizen-scripting-lua54.dll",
-                L"citizen-scripting-lua53.dll",
-                L"citizen-scripting-lua52.dll",
-                L"citizen-scripting-luajit.dll",
-                L"citizen-scripting-lua5x.dll",
-            };
-            for (auto* n : kDlls) {
-                s_Dll = GetModuleHandleW(n);
-                if (s_Dll) break;
-            }
-            if (!s_Dll) {
-                snprintf(s_Status, sizeof(s_Status), "lua: dll nao carregada");
-                return;
-            }
-            Log::Write("LuaExec: dll achada.");
-
-            s_LoadBuf  = (luaL_loadbufferx_fn)GetProcAddress(s_Dll, "luaL_loadbufferx");
-            s_LoadStr  = (luaL_loadstring_fn )GetProcAddress(s_Dll, "luaL_loadstring");
-            s_Pcallk   = (lua_pcallk_fn      )GetProcAddress(s_Dll, "lua_pcallk");
-            s_ToString = (lua_tostring_fn    )GetProcAddress(s_Dll, "lua_tostring");
-            s_SetTop   = (lua_settop_fn      )GetProcAddress(s_Dll, "lua_settop");
-            if ((!s_LoadBuf && !s_LoadStr) || !s_Pcallk) {
-                snprintf(s_Status, sizeof(s_Status), "lua: exports ausentes");
-                Log::Write("LuaExec: luaL_loadbuffer/lua_pcallk ausentes — sem executor.");
-                s_Dll = nullptr;
-                return;
-            }
-
-            MH_Initialize();
-            HookSym(s_Dll, "lua_resume", (void*)hk_resume, (void**)&s_OrigResume);
-            HookSym(s_Dll, "lua_pcallk", (void*)hk_pcallk, (void**)&s_OrigPcallk);
-            HookSym(s_Dll, "lua_call",   (void*)hk_call,   (void**)&s_OrigCall);
-            s_InitDone = true;
-            snprintf(s_Status, sizeof(s_Status), "lua: esperando um state");
+        HMODULE core = GetModuleHandleW(L"citizen-scripting-core.dll");
+        if (!core) {
+            snprintf(s_Status, sizeof(s_Status), "invoker: core dll ausente");
             return;
         }
-    }
-
-    bool Ready() { return s_State.load() != nullptr; }
-
-    const char* Status()
-    {
-        if (s_State.load()) {
-            snprintf(s_Status, sizeof(s_Status), "lua: state capturado");
+        s_FromHash = (FromHashFn)GetProcAddress(core,
+            "?FromHash@ScriptNativeHandler@invoker@fx@@SAAEBV123@_K@Z");
+        s_Invoke = (InvokeFn)GetProcAddress(core,
+            "?Invoke@ScriptNativeContext@invoker@fx@@QEAAXXZ");
+        if (!s_FromHash || !s_Invoke) {
+            snprintf(s_Status, sizeof(s_Status), "invoker: exports ausentes");
+            Log::Write("LuaExec: FromHash/Invoke ausentes em citizen-scripting-core.");
+            s_FromHash = nullptr; s_Invoke = nullptr;
+            return;
         }
-        return s_Status;
+        s_Ok = true;
+        snprintf(s_Status, sizeof(s_Status), "server events: pronto");
+        Log::Write("LuaExec: invoker CFX ok (FromHash=0x%p Invoke=0x%p).",
+                   (void*)s_FromHash, (void*)s_Invoke);
     }
 
-    int Run(const char* code)
+    bool Ready() { return s_Ok; }
+    const char* Status() { return s_Status; }
+
+    static bool CallFx(uint64_t hash, uintptr_t* args, FxArgType* types,
+                       int nargs, uintptr_t* ret)
     {
-        lua_State* L = s_State.load();
-        if (!L) {
-            Log::Write("LuaExec: sem lua_State ainda (joga um tempo e tenta de novo).");
+        const void* info = nullptr;
+        __try { info = s_FromHash(hash); }
+        __except (EXCEPTION_EXECUTE_HANDLER) { info = nullptr; }
+        if (!info) return false;
+
+        FxCtx ctx;
+        memset(&ctx, 0, sizeof(ctx));
+        ctx.info = info;
+        ctx.numArguments = nargs;
+        ctx.trivial = true;
+        for (int i = 0; i < nargs; ++i) {
+            ctx.arguments[i] = args[i];
+            ctx.types[i] = types ? types[i] : FxArgType{};
+            if (ctx.types[i].IsPointer) ctx.trivial = false;
+        }
+        ctx.retvals[0] = ctx.results;
+        ctx.rettypes[0] = 9;
+        ctx.numReturnValues = 1;
+
+        __try {
+            s_Invoke(&ctx);
+            if (ret) ret[0] = ctx.results[0];
+            return true;
+        }
+        __except (EXCEPTION_EXECUTE_HANDLER) {
+            return false;
+        }
+    }
+
+    bool TriggerServer(const char* eventName, const void* payload, int payloadLen)
+    {
+        if (!s_Ok) return false;
+
+        static char s_NameBuf[256];
+        static uint8_t* s_Blobs[16] = {};
+        static int s_BlobIdx = 0;
+
+        strncpy_s(s_NameBuf, eventName, sizeof(s_NameBuf) - 1);
+
+        uint8_t* blob = (uint8_t*)malloc(payloadLen);
+        if (!blob) return false;
+        memcpy(blob, payload, payloadLen);
+        int idx = s_BlobIdx++ % 16;
+        if (s_Blobs[idx]) free(s_Blobs[idx]);
+        s_Blobs[idx] = blob;
+
+        uintptr_t args[3];
+        FxArgType types[3] = {};
+        args[0] = (uintptr_t)s_NameBuf;
+        types[0].IsString = 1; types[0].IsPointer = 1;
+        types[0].Size = (uint32_t)strlen(s_NameBuf) + 1;
+        args[1] = (uintptr_t)blob;
+        types[1].IsPointer = 1;
+        types[1].Size = (uint32_t)payloadLen;
+        args[2] = (uintptr_t)payloadLen;
+
+        bool ok = CallFx(0x7FDD1128 /*TRIGGER_SERVER_EVENT_INTERNAL*/,
+                         args, types, 3, nullptr);
+        Log::Write("LuaExec: TriggerServer '%s' -> %s", eventName,
+                   ok ? "OK" : "FALHOU");
+        return ok;
+    }
+
+    int PlayerServerId(int localPlayerId)
+    {
+        if (!s_Ok) return -1;
+        uintptr_t args[1] = { (uintptr_t)localPlayerId };
+        uintptr_t ret = 0;
+        if (!CallFx(JoaatHash("GET_PLAYER_SERVER_ID"), args, nullptr, 1, &ret))
             return -1;
-        }
-        if (s_SetTop) s_SetTop(L, 0);
-
-        int st;
-        if (s_LoadBuf)
-            st = s_LoadBuf(L, code, strlen(code), "c4pt0r", "t");
-        else
-            st = s_LoadStr(L, code);
-        if (st != 0) {
-            const char* e = s_ToString ? s_ToString(L, -1) : "?";
-            Log::Write("LuaExec: erro de sintaxe: %s", e ? e : "?");
-            if (s_SetTop) s_SetTop(L, 0);
-            return st;
-        }
-        st = s_Pcallk(L, 0, -1 , 0, 0, nullptr);
-        if (st != 0) {
-            const char* e = s_ToString ? s_ToString(L, -1) : "?";
-            Log::Write("LuaExec: erro runtime: %s", e ? e : "?");
-            if (s_SetTop) s_SetTop(L, 0);
-            return st;
-        }
-        Log::Write("LuaExec: script rodou ok.");
-        return 0;
+        return (int)ret;
     }
 }

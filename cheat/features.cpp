@@ -1395,6 +1395,45 @@ namespace C4pt0r::Features
         }
     }
 
+    struct MpBuf { uint8_t d[160]; int n = 0; };
+    static void MpB(MpBuf& b, uint8_t v) {
+        if (b.n < (int)sizeof(b.d)) b.d[b.n++] = v;
+    }
+    static void MpInt(MpBuf& b, int64_t v)
+    {
+        if (v >= 0 && v < 128) { MpB(b, (uint8_t)v); return; }
+        if (v >= -32 && v < 0) { MpB(b, (uint8_t)(int8_t)v); return; }
+        if (v >= -128 && v <= 127) { MpB(b, 0xd0); MpB(b, (uint8_t)v); return; }
+        if (v >= -32768 && v <= 32767) {
+            MpB(b, 0xd1); MpB(b, (uint8_t)(v >> 8)); MpB(b, (uint8_t)v); return;
+        }
+        MpB(b, 0xd2);
+        for (int s = 24; s >= 0; s -= 8) MpB(b, (uint8_t)(v >> s));
+    }
+    static void MpArr(MpBuf& b, int n)
+    {
+        if (n < 16) MpB(b, 0x90 | n);
+        else { MpB(b, 0xdc); MpB(b, (uint8_t)(n >> 8)); MpB(b, (uint8_t)n); }
+    }
+    static void MpStr(MpBuf& b, const char* s)
+    {
+        int len = (int)strlen(s);
+        if (len < 32) MpB(b, 0xa0 | len);
+        else { MpB(b, 0xd9); MpB(b, (uint8_t)len); }
+        for (int i = 0; i < len; ++i) MpB(b, (uint8_t)s[i]);
+    }
+
+    static void FireEvents(const char* const* events, int count, int srvId)
+    {
+        MpBuf blob;
+        MpArr(blob, 1);
+        MpInt(blob, srvId);
+        int ok = 0;
+        for (int i = 0; i < count; ++i)
+            if (LuaExec::TriggerServer(events[i], blob.d, blob.n)) ++ok;
+        Log::Write("Eventos: %d/%d disparados (srvId %d).", ok, count, srvId);
+    }
+
     static void TickLua()
     {
         LuaExec::Init();
@@ -1404,58 +1443,67 @@ namespace C4pt0r::Features
             int t = g_Lua.targetId;
             g_Lua.preset = 0;
 
-            char buf[4096];
-            if (p == 4) {
-
-                snprintf(buf, sizeof(buf),
-                    "TriggerEvent('esx_ambulancejob:revive')\n"
-                    "TriggerServerEvent('hospital:server:RevivePlayer',"
-                    "GetPlayerServerId(PlayerId()))\n");
-            } else if (t >= 0) {
-                const char* body = "";
-                if (p == 1) {
-                    body =
-                        "TriggerServerEvent('hospital:server:RevivePlayer',s)\n"
-                        "TriggerServerEvent('esx_ambulancejob:revive',s)\n"
-                        "TriggerServerEvent('qb-ambulancejob:revive',s)\n"
-                        "TriggerServerEvent('osp_ambulance:revive',s)\n"
-                        "TriggerServerEvent('wasabi_ambulance:revive',s)\n"
-                        "TriggerServerEvent('paramedico:reanimar',s)\n"
-                        "TriggerServerEvent('hospital:reanimar',s)\n"
-                        "TriggerServerEvent('vrp:reanimar',s)\n";
-                } else if (p == 2) {
-                    body =
-                        "TriggerServerEvent('CarryPeople:sync',s)\n"
-                        "TriggerServerEvent('esx_ambulancejob:drag',s)\n"
-                        "TriggerServerEvent('police:drag',s)\n";
+            if (!LuaExec::Ready()) {
+                Log::Write("Eventos: invoker ainda nao pronto.");
+            } else {
+                int local = (p == 4) ? Natives::PlayerId() : t;
+                int srv = LuaExec::PlayerServerId(local);
+                Log::Step("preset %d local=%d srv=%d", p, local, srv);
+                if (srv < 0) {
+                    Log::Write("Eventos: server id falhou pro player %d.", local);
+                } else if (p == 4) {
+                    static const char* kSelf[] = {
+                        "hospital:server:RevivePlayer",
+                        "esx_ambulancejob:revive",
+                        "qb-ambulancejob:revive",
+                        "paramedico:reanimar",
+                        "vrp:reanimar",
+                    };
+                    FireEvents(kSelf, (int)_countof(kSelf), srv);
+                } else if (p == 1) {
+                    static const char* kRev[] = {
+                        "hospital:server:RevivePlayer",
+                        "esx_ambulancejob:revive",
+                        "qb-ambulancejob:revive",
+                        "osp_ambulance:revive",
+                        "wasabi_ambulance:revive",
+                        "paramedico:reanimar",
+                        "hospital:reanimar",
+                        "vrp:reanimar",
+                    };
+                    FireEvents(kRev, (int)_countof(kRev), srv);
+                } else if (p == 2 || p == 5) {
+                    static const char* kCarry[] = {
+                        "CarryPeople:sync",
+                        "police:drag",
+                        "esx_ambulancejob:drag",
+                        "esx_policejob:drag",
+                        "admin:bringPlayer",
+                        "admin:bring",
+                        "bring:player",
+                    };
+                    FireEvents(kCarry, (int)_countof(kCarry), srv);
                 } else if (p == 3) {
-                    body =
-                        "TriggerServerEvent('admin:god',s)\n"
-                        "TriggerServerEvent('vrp:god',s)\n"
-                        "TriggerServerEvent('god:player',s)\n";
-                } else if (p == 5) {
-                    body =
-                        "TriggerServerEvent('CarryPeople:sync',s)\n"
-                        "TriggerServerEvent('police:drag',s)\n"
-                        "TriggerServerEvent('esx_ambulancejob:drag',s)\n"
-                        "TriggerServerEvent('esx_policejob:drag',s)\n"
-                        "TriggerServerEvent('admin:bringPlayer',s)\n"
-                        "TriggerServerEvent('admin:bring',s)\n"
-                        "TriggerServerEvent('bring:player',s)\n"
-                        "TriggerServerEvent('vRP:teleport',s)\n";
+                    static const char* kGod[] = {
+                        "admin:god", "vrp:god", "god:player",
+                    };
+                    FireEvents(kGod, (int)_countof(kGod), srv);
                 }
-                snprintf(buf, sizeof(buf),
-                    "local s=GetPlayerServerId(%d)\n%s", t, body);
-            }
-            if (buf[0]) {
-                if (LuaExec::Run(buf) == 0)
-                    Log::Write("Lua: preset %d disparado (alvo %d).", p, t);
             }
         }
 
         if (g_Lua.run) {
             g_Lua.run = false;
-            if (g_Lua.code[0]) LuaExec::Run(g_Lua.code);
+            if (g_Lua.eventName[0] && LuaExec::Ready()) {
+                MpBuf blob;
+                if (g_Lua.eventArg >= 0) {
+                    MpArr(blob, 1);
+                    MpInt(blob, g_Lua.eventArg);
+                } else {
+                    MpArr(blob, 0);
+                }
+                LuaExec::TriggerServer(g_Lua.eventName, blob.d, blob.n);
+            }
         }
     }
 

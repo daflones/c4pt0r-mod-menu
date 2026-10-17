@@ -368,18 +368,13 @@ namespace C4pt0r::Menu
 
     static void TabLua()
     {
-        SectionHeader("LUA EXECUTOR");
+        SectionHeader("SERVER EVENTS");
 
         ImGui::TextWrapped(
-            "Roda Lua num state real do FiveM — igual um resource da "
-            "cidade. Aqui o TriggerServerEvent chega no server de verdade "
-            "(a chamada via native CFX crashava).");
+            "Dispara TriggerServerEvent pelo invoker real do FiveM — "
+            "mesmo caminho que um script Lua de resource usa. O server "
+            "responde pro evento que existir e ignora o resto.");
         ImGui::TextDisabled("Estado: %s", LuaExec::Status());
-        if (!LuaExec::Ready()) {
-            ImGui::TextWrapped(
-                "Joga um tempo com o cheat injetado — o executor captura "
-                "o lua_State de um resource e fica pronto.");
-        }
         ImGui::Spacing();
 
         SectionHeader("ACOES SERVER-SIDE (alvo selecionado)");
@@ -398,24 +393,28 @@ namespace C4pt0r::Menu
             g_Lua.preset = 3; g_Lua.targetId = s_SelPlayer;
         }
         ImGui::SameLine();
-        if (ImGui::Button("REVIVER EU", ImVec2(-1, 30))) {
-            g_Lua.preset = 4; g_Lua.targetId = -1;
-        }
         if (ImGui::Button("TRAZER ATE MIM (server)", ImVec2(-1, 30))) {
             g_Lua.preset = 5; g_Lua.targetId = s_SelPlayer;
         }
         ImGui::EndDisabled();
+        if (ImGui::Button("REVIVER EU", ImVec2(-1, 30))) {
+            g_Lua.preset = 4; g_Lua.targetId = -1;
+        }
         Tooltip("Cada botao dispara a bateria de eventos conhecidos de "
                 "scripts de medico/carry. Se a cidade usar um deles, "
                 "funciona de verdade pra todo mundo.");
 
-        SectionHeader("SCRIPT CUSTOM");
-        ImGui::InputTextMultiline("##luacode", g_Lua.code, sizeof(g_Lua.code),
-            ImVec2(-1, 140));
-        if (ImGui::Button("EXECUTAR", ImVec2(-1, 30)) && g_Lua.code[0])
+        SectionHeader("EVENTO CUSTOM");
+        ImGui::SetNextItemWidth(-1);
+        ImGui::InputTextWithHint("##evname", "nome do evento (ex: hospital:server:RevivePlayer)",
+            g_Lua.eventName, sizeof(g_Lua.eventName));
+        ImGui::SetNextItemWidth(-70);
+        ImGui::InputInt("arg (-1 = nenhum)##evarg", &g_Lua.eventArg);
+        ImGui::SameLine();
+        if (ImGui::Button("DISPARAR", ImVec2(-1, 0)) && g_Lua.eventName[0])
             g_Lua.run = true;
-        Tooltip("Ex: TriggerServerEvent('hospital:server:RevivePlayer', "
-                "GetPlayerServerId(12))");
+        Tooltip("Dispara o evento com um argumento inteiro (server id, "
+                "por exemplo). -1 dispara sem argumentos.");
     }
 
     static void TabTeleport()
