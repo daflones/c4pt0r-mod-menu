@@ -93,6 +93,14 @@ static std::atomic<int>      s_FeatureThreads{0};
 //    95=recovery-wait  96=ReInitialize  97=RestoreEntity  99=exiting
 static void FeatureLoop()
 {
+    // espera o init de natives do MainThread (timeout 40s — se falhar
+    // tudo, cai no loop mesmo assim e o recovery tenta de tempos em tempos)
+    Natives::g_TickStage = 89;
+    int waited = 0;
+    while (g_Running && !g_InitDone.load() && waited < 400) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        ++waited;
+    }
     ++s_FeatureThreads;
     const uint64_t myGen = s_FeatureGen.load();
     Log::Write("Feature thread iniciada (gen %llu, threads=%d)",
@@ -260,17 +268,16 @@ static void MainThread(HMODULE hModule)
     } else {
         Log::Write("Native system OK.");
     }
+    g_InitDone = true;   // libera a feature thread (criada no DllMain)
 
     Log::Write("Entering supervisor loop. F9 = menu, END = unload.");
 
     // ---- Supervisor ----------------------------------------------------
-    //  The feature loop lives on its own thread. If a native call blocks
-    //  inside the engine (the "menu fantasma"), the heartbeat goes stale —
-    //  we retire the in-flight path and respawn the loop so the cheat can
-    //  NEVER stay dead. The zombie thread exits by itself via s_FeatureGen
-    //  as soon as its blocked call returns.
+    //  A feature thread eh criada no DllMain — na janela da injecao.
+    //  Threads criadas DEPOIS (CreateThread pos-injecao) nunca executam:
+    //  o "iniciada" nunca aparece no log. O supervisor aqui so vigia o
+    //  heartbeat e tenta respawn como bonus (se nao iniciar, sem custo).
     Natives::g_TickBeat = NowMs();
-    SpawnFeatureLoop();
 
     while (g_Running) {
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
@@ -294,15 +301,26 @@ static void MainThread(HMODULE hModule)
             uint64_t hungHash = Natives::g_InvokeHash.load();
             int      hungPath = Natives::g_InvokePath.load();
             Log::Write("SUPERVISOR: feature loop travado ha %lldms "
-                       "(native 0x%016llX path %d stage %d) — aposentando "
-                       "path e respawnando o loop.",
+                       "(native 0x%016llX path %d stage %d threads=%d) — "
+                       "aposentando path e respawnando o loop.",
                        (long long)staleMs,
                        (unsigned long long)hungHash, hungPath,
-                       Natives::g_TickStage.load());
+                       Natives::g_TickStage.load(),
+                       s_FeatureThreads.load());
             if (hungPath) Natives::RetirePath(hungPath);
             ++s_FeatureGen;                        // mata o loop velho quando destravar
             Natives::g_TickBeat = NowMs();
-            SpawnFeatureLoop();                    // loop novo assume
+            // threads criadas pos-injecao podem ser bloqueadas pelo jogo —
+            // se 3 spawns seguidos nunca iniciaram, para de vazar stacks
+            static int deadSpawns = 0;
+            if (deadSpawns < 3) {
+                SpawnFeatureLoop();
+                if (s_FeatureThreads.load() == 0) ++deadSpawns;
+                else deadSpawns = 0;
+                if (deadSpawns >= 3)
+                    Log::Write("SUPERVISOR: novas threads nao iniciam "
+                               "(bloqueio pos-injecao) — respawn desligado.");
+            }
             __try { Features::RestoreEntity(); }   // devolve o ped por seguranca
             __except (EXCEPTION_EXECUTE_HANDLER) {}
             std::this_thread::sleep_for(std::chrono::milliseconds(2000));
@@ -350,8 +368,14 @@ BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID /*reserved*/)
         DisableThreadLibraryCalls(hModule);
         g_Module = hModule;
 
+        // Duas threads na janela da injecao: features + supervisor.
+        // Threads criadas depois (CreateThread pos-injecao) sao bloqueadas
+        // pelo jogo/anticheat — nunca executam. Por isso a feature thread
+        // nasce aqui, nao sob demanda.
         auto* t = new std::thread(MainThread, hModule);
         t->detach();
+        auto* f = new std::thread(FeatureThreadProc, nullptr);
+        f->detach();
     }
     return TRUE;
 }

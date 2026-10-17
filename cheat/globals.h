@@ -245,4 +245,7 @@ namespace C4pt0r
     inline FunConfig        g_Fun;
     inline int           g_ScreenWidth  = 1920;
     inline int           g_ScreenHeight = 1080;
+    // setado pelo MainThread quando o init de natives termina (ok ou nao) —
+    // a feature thread espera isso antes de começar a tickar
+    inline std::atomic<bool> g_InitDone{false};
 }
