@@ -934,11 +934,12 @@ namespace C4pt0r::Features
         "component_extended_clip","component_luxury_finish"
     };
 
-    static void GiveOneWeapon(int ped, const char* model, int ammo)
+    static void GiveOneWeapon(int ped, const char* model, int ammo,
+                              bool quiet = false)
     {
         uint64_t a[5] = { (uint64_t)ped, (uint64_t)Natives::JoaatHash(model),
                           (uint64_t)ammo, 0, 1 };
-        if (CN("GIVE_WEAPON_TO_PED", a, 5))
+        if (CN("GIVE_WEAPON_TO_PED", a, 5) && !quiet)
             Log::Write("arma: %s (muni %d)", model, ammo);
     }
 
@@ -964,7 +965,9 @@ namespace C4pt0r::Features
                 }
             }
             if (g_Weapon.giveAll) {
-                for (const char* w : kWeaponList) GiveOneWeapon(ped, w, 9999);
+                for (const char* w : kWeaponList) GiveOneWeapon(ped, w, 9999, true);
+                Log::Write("arma: todas dadas (%d modelos).",
+                           (int)(sizeof(kWeaponList) / sizeof(kWeaponList[0])));
             }
             if (g_Weapon.refillAll) {
                 for (const char* w : kWeaponList) {
@@ -1308,6 +1311,55 @@ namespace C4pt0r::Features
         }
     }
 
+    // ---- MsgPack minimo + TriggerServerEvent ------------------------------
+    //  TriggerServerEvent do Lua serializa os args como ARRAY msgpack e
+    //  chama o native TRIGGER_SERVER_EVENT_INTERNAL(nome, payload, len).
+    //  Isso deixa o cheat disparar eventos de resources do server (carry,
+    //  etc.) — so funciona se o resource existir e aceitar a chamada.
+    struct MsgPack {
+        std::vector<uint8_t> b;
+        void U16(uint16_t v) { b.push_back(uint8_t(v >> 8)); b.push_back(uint8_t(v)); }
+        void U32(uint32_t v) { for (int s = 24; s >= 0; s -= 8) b.push_back(uint8_t(v >> s)); }
+        void U64(uint64_t v) { for (int s = 56; s >= 0; s -= 8) b.push_back(uint8_t(v >> s)); }
+        void BeginArray(int n) { b.push_back(uint8_t(0x90 | n)); }
+        void Int(int64_t v) {
+            if (v >= 0 && v < 128)           b.push_back((uint8_t)v);
+            else if (v >= -32 && v < 0)      b.push_back((uint8_t)v);           // neg fixint
+            else if (v >= 0 && v <= 0xFF)    { b.push_back(0xCC); b.push_back((uint8_t)v); }
+            else if (v >= 0 && v <= 0xFFFF)  { b.push_back(0xCD); U16((uint16_t)v); }
+            else if (v >= 0 && v <= 0xFFFFFFFFull) { b.push_back(0xCE); U32((uint32_t)v); }
+            else if (v >= -128)              { b.push_back(0xD0); b.push_back((uint8_t)v); }
+            else if (v >= -32768)            { b.push_back(0xD1); U16((uint16_t)v); }
+            else if (v >= INT32_MIN)         { b.push_back(0xD2); U32((uint32_t)v); }
+            else                             { b.push_back(0xD3); U64((uint64_t)v); }
+        }
+        void Flt(double d) { b.push_back(0xCB); uint64_t u; memcpy(&u, &d, 8); U64(u); }
+        void Str(const char* s) {
+            size_t n = strlen(s);
+            if (n < 32)       b.push_back(uint8_t(0xA0 | n));
+            else if (n < 256) { b.push_back(0xD9); b.push_back((uint8_t)n); }
+            else              { b.push_back(0xDA); U16((uint16_t)n); }
+            b.insert(b.end(), s, s + n);
+        }
+    };
+
+    static bool TriggerServer(const char* event, const MsgPack& args)
+    {
+        uint64_t a[3] = { (uint64_t)event,
+                          (uint64_t)args.b.data(),
+                          (uint64_t)args.b.size() };
+        return CN("TRIGGER_SERVER_EVENT_INTERNAL", a, 3);
+    }
+
+    // server id do alvo (o que os eventos de server esperam, nao o idx local)
+    static int PlayerServerId(int playerIdx)
+    {
+        uint64_t a[1] = { (uint64_t)playerIdx };
+        uint64_t r[4] = {};
+        if (CN("GET_PLAYER_SERVER_ID", a, 1, r) && r[0]) return (int)r[0];
+        return -1;
+    }
+
     // ---- Acoes em outros jogadores: dar god / agarrar --------------------
     //  O ped de outro player pertence ao cliente dele — se o server nao
     //  ceder controle, o efeito fica so local (voce ve, o server nao). A
@@ -1316,6 +1368,7 @@ namespace C4pt0r::Features
     static int  s_GrabPed      = 0;    // alvo esperando controle
     static int  s_GrabAttached = 0;    // alvo ja carregado no ombro
     static int  s_GrabTries    = 0;
+    static int  s_GrabSrvId    = -1;   // server id do alvo (eventos de stop)
 
     static void GrabDetach()
     {
@@ -1324,7 +1377,43 @@ namespace C4pt0r::Features
             CN("DETACH_ENTITY", a, 3);
         }
         s_GrabPed = s_GrabAttached = 0;
+        s_GrabSrvId = -1;
         g_PActions.grabActive = false;
+    }
+
+    // dispara os eventos de carry mais usados em server BR (vRP/creative):
+    // CarryPeople:sync(srvId) e cmg2_animations:sync(14 args). Se o server
+    // nao tiver o resource, eles nao fazem nada — o attach local fica de
+    // fallback visual.
+    static void GrabFireServerStart(int localIdx)
+    {
+        int srvId = PlayerServerId(localIdx);
+        s_GrabSrvId = srvId;
+        if (srvId <= 0) {
+            Log::Write("Grab: sem server id — eventos de server pulados.");
+            return;
+        }
+        { MsgPack m; m.BeginArray(1); m.Int(srvId);
+          TriggerServer("CarryPeople:sync", m); }
+        { MsgPack m; m.BeginArray(15);
+          m.Int(localIdx);
+          m.Str("missfinale_c2mcs_1"); m.Str("nm");
+          m.Str("fin_c2_mcs_1_camman"); m.Str("firemans_carry");
+          m.Flt(0.15); m.Flt(0.27); m.Flt(0.63);
+          m.Int(srvId); m.Int(100000); m.Flt(0.0);
+          m.Int(49); m.Int(33); m.Int(1);
+          TriggerServer("cmg2_animations:sync", m); }
+        Log::Write("Grab: eventos de carry disparados pro server (srvId %d).", srvId);
+    }
+
+    static void GrabFireServerStop()
+    {
+        if (s_GrabSrvId <= 0) return;
+        { MsgPack m; m.BeginArray(1); m.Int(s_GrabSrvId);
+          TriggerServer("CarryPeople:stop", m); }
+        { MsgPack m; m.BeginArray(1); m.Int(s_GrabSrvId);
+          TriggerServer("cmg2_animations:stop", m); }
+        s_GrabSrvId = -1;
     }
 
     static void TickPlayerActions()
@@ -1356,7 +1445,10 @@ namespace C4pt0r::Features
         // ---- soltar ----
         if (g_PActions.releaseGrab) {
             g_PActions.releaseGrab = false;
+            GrabFireServerStop();
             GrabDetach();
+            uint64_t ct[1] = { (uint64_t)ped };
+            CN("CLEAR_PED_SECONDARY_TASK", ct, 1);   // para nossa anim de carry
             Log::Write("Grab: soltou.");
         }
 
@@ -1369,6 +1461,9 @@ namespace C4pt0r::Features
             if (!tped) {
                 Log::Write("Grab: id %d sem ped (offline?).", target);
             } else {
+                GrabFireServerStart(target);         // tenta o server primeiro
+                uint64_t ad[2] = { (uint64_t)"missfinale_c2mcs_1", 0 };
+                CN("REQUEST_ANIM_DICT", ad, 1);      // nossa anim de carry
                 s_GrabPed = tped;
                 s_GrabTries = 0;
             }
@@ -1397,6 +1492,13 @@ namespace C4pt0r::Features
                     if (CN("ATTACH_ENTITY_TO_ENTITY", at, 15)) {
                         s_GrabAttached = s_GrabPed;
                         g_PActions.grabActive = true;
+                        // nossa animacao de carregar (cosmetica — a do
+                        // alvo roda no cliente dele via evento de server)
+                        uint64_t ta[10] = {
+                            (uint64_t)ped, (uint64_t)"missfinale_c2mcs_1",
+                            (uint64_t)"fin_c2_mcs_1_camman",
+                            FA(8.f), FA(-8.f), (uint64_t)-1, 49, 0, 0, 0 };
+                        CN("TASK_PLAY_ANIM", ta, 10);
                         Log::Write(ctrl ? "Grab: carregando (controle ok — efetivo)."
                                         : "Grab: carregando SO LOCAL — server nao deu controle.");
                     } else {
