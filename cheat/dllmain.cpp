@@ -88,19 +88,27 @@ static int64_t NowMs()
 static std::atomic<uint64_t> s_FeatureGen{0};
 static std::atomic<int>      s_FeatureThreads{0};
 
+//  g_TickStage values outside Features::Tick (1-13 sao os sub-ticks):
+//    90=entry  91=loop-top  92=in-Tick call  93=watchdog  94=sleep
+//    95=recovery-wait  96=ReInitialize  97=RestoreEntity  99=exiting
 static void FeatureLoop()
 {
     ++s_FeatureThreads;
     const uint64_t myGen = s_FeatureGen.load();
+    Log::Write("Feature thread iniciada (gen %llu, threads=%d)",
+               (unsigned long long)myGen, s_FeatureThreads.load());
     bool nativesOk = Natives::IsReady();
     int consecutiveErrors = 0;
     int recoveryWait = 0;
     int watchTicks = 0;
     int deadPings  = 0;
+    Natives::g_TickStage = 90;
 
     while (g_Running && s_FeatureGen.load() == myGen) {
+        Natives::g_TickStage = 91;
         Natives::g_TickBeat = NowMs();
         if (nativesOk) {
+            Natives::g_TickStage = 92;
             __try {
                 Features::Tick();
                 consecutiveErrors = 0;
@@ -118,6 +126,7 @@ static void FeatureLoop()
                     consecutiveErrors = 0;
                     Natives::MarkUnhealthy();
                     Log::Write("Features pausadas por excecoes — restaurando ped e agendando re-init.");
+                    Natives::g_TickStage = 97;
                     __try { Features::RestoreEntity(); }   // mantem toggles do user
                     __except (EXCEPTION_EXECUTE_HANDLER) {}
                 }
@@ -127,6 +136,7 @@ static void FeatureLoop()
             // retorna false, todos os paths falham). Nesse caso o tick roda
             // mas nada acontece — era o "menu fantasma". Pinga um nativo
             // seguro a cada ~2s; 2 falhas = declara morto e re-inicializa.
+            Natives::g_TickStage = 93;
             if (++watchTicks >= 120) {   // 120 x 16ms ~= 2s
                 watchTicks = 0;
                 bool alive = false;
@@ -140,6 +150,7 @@ static void FeatureLoop()
                         Natives::MarkUnhealthy();
                         Log::Write("Watchdog: natives pararam de responder "
                                    "sem excecao — re-init agendado.");
+                        Natives::g_TickStage = 97;
                         __try { Features::RestoreEntity(); }
                         __except (EXCEPTION_EXECUTE_HANDLER) {}
                     }
@@ -149,9 +160,11 @@ static void FeatureLoop()
             }
         } else {
             // auto-recovery: re-resolve + re-probe periodically
+            Natives::g_TickStage = 95;
             if (++recoveryWait >= 312) {   // ~5s em passos de 16ms
                 recoveryWait = 0;
                 Log::Write("Tentando re-inicializar natives...");
+                Natives::g_TickStage = 96;
                 __try {
                     if (Natives::ReInitialize()) {
                         nativesOk = true;
@@ -164,9 +177,13 @@ static void FeatureLoop()
                 }
             }
         }
+        Natives::g_TickStage = 94;
         std::this_thread::sleep_for(std::chrono::milliseconds(16));
     }
+    Natives::g_TickStage = 99;
     --s_FeatureThreads;
+    Log::Write("Feature thread saindo (gen %llu, threads=%d)",
+               (unsigned long long)myGen, s_FeatureThreads.load());
 }
 
 //  CreateThread puro: std::thread teria destrutor e impediria __try no
