@@ -1,7 +1,4 @@
-// ============================================================================
-//  C4pt0r Cheats — D3D11 Present Hook + WndProc + ImGui Bootstrap
-//  Uses MinHook for inline detour (works even when FiveM wraps DXGI)
-// ============================================================================
+
 
 #include "hooks.h"
 #include "globals.h"
@@ -9,10 +6,8 @@
 #include "features.h"
 #include "logger.h"
 
-// MinHook
 #include "MinHook.h"
 
-// ImGui
 #include "imgui.h"
 #include "imgui_impl_win32.h"
 #include "imgui_impl_dx11.h"
@@ -20,27 +15,21 @@
 #include <d3d11.h>
 #include <dxgi.h>
 
-// Forward-decl from imgui_impl_win32.cpp
 extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(
     HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
 namespace C4pt0r::Hooks
 {
-    // ---- Types ----------------------------------------------------------
+
     using PresentFn       = HRESULT(__stdcall*)(IDXGISwapChain*, UINT, UINT);
     using ResizeBuffersFn = HRESULT(__stdcall*)(IDXGISwapChain*, UINT, UINT, UINT, DXGI_FORMAT, UINT);
 
-    // ---- State ----------------------------------------------------------
     static PresentFn       oPresent        = nullptr;
     static ResizeBuffersFn oResizeBuffers  = nullptr;
     static bool            s_ImGuiInited   = false;
     static void*           s_PresentTarget = nullptr;
     static void*           s_ResizeTarget  = nullptr;
 
-    // NOTE: no WndProc subclassing — SetWindowLongPtr(GWLP_WNDPROC) is the
-    // single most-checked thing FiveM's adhesive validates, and a foreign
-    // window proc on grcWindow triggers the early-exit trap the moment an
-    // input message arrives. All menu input is fed manually instead.
     static bool s_KeyDown[256] = {};
 
     static bool KeyPressed(int vk)
@@ -51,7 +40,6 @@ namespace C4pt0r::Hooks
         return pressed;
     }
 
-    // Feed ImGui mouse/button state without touching the window proc
     static void FeedImGuiInput()
     {
         ImGuiIO& io = ImGui::GetIO();
@@ -66,16 +54,12 @@ namespace C4pt0r::Hooks
         io.AddMouseButtonEvent(2, (GetAsyncKeyState(VK_MBUTTON) & 0x8000) != 0);
     }
 
-    // ---- ResizeBuffers hook ---------------------------------------------
     static HRESULT __stdcall HookedResizeBuffers(
         IDXGISwapChain* sc, UINT bufferCount, UINT width, UINT height,
         DXGI_FORMAT format, UINT flags)
     {
         Log::Write("ResizeBuffers called: %ux%u", width, height);
 
-        // Only touch RTV if Present already bound this swapchain —
-        // ResizeBuffers can fire before the first Present, when
-        // g_Device/g_SwapChain are still null → was a guaranteed AV
         bool ours = s_ImGuiInited && sc == g_SwapChain && g_Device;
         if (ours && g_RenderTarget) {
             g_RenderTarget->Release();
@@ -99,10 +83,9 @@ namespace C4pt0r::Hooks
         return hr;
     }
 
-    // ---- Present hook (main render entry) -------------------------------
     static HRESULT __stdcall HookedPresent(IDXGISwapChain* sc, UINT syncInterval, UINT flags)
     {
-        // First-time ImGui init
+
         if (!s_ImGuiInited) {
             Log::Write("Present hooked! First call - initializing ImGui...");
 
@@ -121,7 +104,6 @@ namespace C4pt0r::Hooks
 
             Log::Write("SwapChain: %ux%u, HWND=0x%p", g_ScreenWidth, g_ScreenHeight, g_GameWindow);
 
-            // Back-buffer render target
             ID3D11Texture2D* backBuf = nullptr;
             sc->GetBuffer(0, __uuidof(ID3D11Texture2D), reinterpret_cast<void**>(&backBuf));
             if (!backBuf) {
@@ -131,7 +113,6 @@ namespace C4pt0r::Hooks
             g_Device->CreateRenderTargetView(backBuf, nullptr, &g_RenderTarget);
             backBuf->Release();
 
-            // ImGui
             ImGui::CreateContext();
             ImGuiIO& io = ImGui::GetIO();
             io.ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange;
@@ -145,13 +126,9 @@ namespace C4pt0r::Hooks
             Log::Write("ImGui initialized. Menu ready (F9 to toggle).");
         }
 
-        // Only render on the swapchain we initialized against — FiveM runs
-        // extra swapchains (CEF overlays etc.) and binding our RTV with a
-        // foreign device context corrupts the pipeline state
         if (sc != g_SwapChain || !g_DeviceContext || !g_RenderTarget)
             return oPresent(sc, syncInterval, flags);
 
-        // Key polling (edge-detected) — replaces the WndProc key handling
         if (KeyPressed(g_Menu.toggleKey)) {
             g_Menu.isOpen = !g_Menu.isOpen;
             Log::Write("Menu toggled: %s", g_Menu.isOpen ? "OPEN" : "CLOSED");
@@ -162,11 +139,8 @@ namespace C4pt0r::Hooks
             return oPresent(sc, syncInterval, flags);
         }
 
-        // ---- Render frame with SEH protection ----
         __try {
-            // O tick do cheat roda na thread de render do JOGO — o adhesive
-            // suspende threads estrangeiras, mas suspender essa congelaria
-            // o jogo inteiro. Features nunca mais "morrem do nada".
+
             Features::FrameTick();
             FeedImGuiInput();
 
@@ -174,7 +148,6 @@ namespace C4pt0r::Hooks
             ImGui_ImplWin32_NewFrame();
             ImGui::NewFrame();
 
-            // Cursor control: show/hide based on menu state
             ImGuiIO& io = ImGui::GetIO();
             if (g_Menu.isOpen) {
                 io.MouseDrawCursor = true;
@@ -184,7 +157,6 @@ namespace C4pt0r::Hooks
                 io.ConfigFlags |= ImGuiConfigFlags_NoMouseCursorChange;
             }
 
-            // Watermark
             if (g_Menu.showWatermark && !g_Menu.isOpen) {
                 ImGui::SetNextWindowPos(ImVec2(10, 10), ImGuiCond_Always);
                 ImGui::SetNextWindowBgAlpha(0.35f);
@@ -198,14 +170,11 @@ namespace C4pt0r::Hooks
                 ImGui::End();
             }
 
-            // Menu
             if (g_Menu.isOpen)
                 Menu::Render();
 
-            // ESP overlay (always, even when menu closed)
             Features::RenderOverlay();
 
-            // ---- Finish frame ----
             ImGui::EndFrame();
             ImGui::Render();
             g_DeviceContext->OMSetRenderTargets(1, &g_RenderTarget, nullptr);
@@ -218,12 +187,10 @@ namespace C4pt0r::Hooks
         return oPresent(sc, syncInterval, flags);
     }
 
-    // ---- Public: Initialize ---------------------------------------------
     bool Initialize()
     {
         Log::Write("Hooks::Initialize() starting...");
 
-        // ---- Create dummy swap chain to grab VTable addresses ----
         WNDCLASSEXW wc{};
         wc.cbSize        = sizeof(wc);
         wc.style         = CS_HREDRAW | CS_VREDRAW;
@@ -262,22 +229,19 @@ namespace C4pt0r::Hooks
             return false;
         }
 
-        // Get function addresses from VTable
         void** vtable = *reinterpret_cast<void***>(tmpSwap);
-        s_PresentTarget = vtable[8];   // IDXGISwapChain::Present
-        s_ResizeTarget  = vtable[13];  // IDXGISwapChain::ResizeBuffers
+        s_PresentTarget = vtable[8];
+        s_ResizeTarget  = vtable[13];
 
         Log::Write("Present address: 0x%p", s_PresentTarget);
         Log::Write("ResizeBuffers address: 0x%p", s_ResizeTarget);
 
-        // Release dummy
         tmpSwap->Release();
         tmpDevice->Release();
         tmpCtx->Release();
         DestroyWindow(hDummy);
         UnregisterClassW(wc.lpszClassName, wc.hInstance);
 
-        // ---- MinHook: detour the actual function code ----
         MH_STATUS mhStatus = MH_Initialize();
         if (mhStatus != MH_OK) {
             Log::Write("ERROR: MH_Initialize failed (%d)", mhStatus);
@@ -285,7 +249,6 @@ namespace C4pt0r::Hooks
         }
         Log::Write("MinHook initialized");
 
-        // Hook Present
         mhStatus = MH_CreateHook(s_PresentTarget,
                                  reinterpret_cast<void*>(&HookedPresent),
                                  reinterpret_cast<void**>(&oPresent));
@@ -295,18 +258,16 @@ namespace C4pt0r::Hooks
         }
         Log::Write("Present hook created");
 
-        // Hook ResizeBuffers
         mhStatus = MH_CreateHook(s_ResizeTarget,
                                  reinterpret_cast<void*>(&HookedResizeBuffers),
                                  reinterpret_cast<void**>(&oResizeBuffers));
         if (mhStatus != MH_OK) {
             Log::Write("WARNING: MH_CreateHook(ResizeBuffers) failed (%d) - non-critical", mhStatus);
-            // Non-critical, continue
+
         } else {
             Log::Write("ResizeBuffers hook created");
         }
 
-        // Enable all hooks
         mhStatus = MH_EnableHook(MH_ALL_HOOKS);
         if (mhStatus != MH_OK) {
             Log::Write("ERROR: MH_EnableHook failed (%d)", mhStatus);
@@ -317,23 +278,19 @@ namespace C4pt0r::Hooks
         return true;
     }
 
-    // ---- Public: Shutdown -----------------------------------------------
     void Shutdown()
     {
         Log::Write("Hooks::Shutdown() starting...");
 
-        // Disable and remove all MinHook hooks
         MH_DisableHook(MH_ALL_HOOKS);
         MH_Uninitialize();
 
-        // Tear down ImGui
         if (s_ImGuiInited) {
             ImGui_ImplDX11_Shutdown();
             ImGui_ImplWin32_Shutdown();
             ImGui::DestroyContext();
         }
 
-        // Release render target
         if (g_RenderTarget) { g_RenderTarget->Release(); g_RenderTarget = nullptr; }
 
         Log::Write("Hooks cleaned up.");

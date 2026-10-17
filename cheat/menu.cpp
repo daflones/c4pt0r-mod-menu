@@ -1,6 +1,4 @@
-// ============================================================================
-//  C4pt0r Cheats — ImGui Menu (sidebar layout, cyan accent)
-// ============================================================================
+
 
 #include "menu.h"
 #include "globals.h"
@@ -11,77 +9,67 @@
 
 #include <shellapi.h>
 #include <chrono>
+#include <unordered_map>
+
+static const ImVec4 kAccent  = ImVec4(0.13f, 0.83f, 0.74f, 1.00f);
+static const ImU32  kAccentU = IM_COL32(33, 212, 189, 255);
 
 namespace C4pt0r::Menu
 {
-    // ---- Custom style: deep dark with cyan accent -----------------------
     void SetupStyle()
     {
         ImGuiStyle& s  = ImGui::GetStyle();
         ImVec4* c       = s.Colors;
+        const float A = 0.83f;
 
-        // Window / child / popup
-        c[ImGuiCol_WindowBg]           = ImVec4(0.05f, 0.05f, 0.08f, 0.97f);
-        c[ImGuiCol_ChildBg]            = ImVec4(0.06f, 0.06f, 0.10f, 1.00f);
-        c[ImGuiCol_PopupBg]            = ImVec4(0.08f, 0.08f, 0.13f, 0.97f);
-        c[ImGuiCol_Border]             = ImVec4(0.00f, 0.83f, 1.00f, 0.15f);
+        c[ImGuiCol_WindowBg]           = ImVec4(0.035f, 0.040f, 0.060f, 0.98f);
+        c[ImGuiCol_ChildBg]            = ImVec4(0.045f, 0.052f, 0.075f, 1.00f);
+        c[ImGuiCol_PopupBg]            = ImVec4(0.060f, 0.068f, 0.095f, 0.98f);
+        c[ImGuiCol_Border]             = ImVec4(kAccent.x, kAccent.y, kAccent.z, 0.12f);
 
-        // Headers / tabs
-        c[ImGuiCol_Header]             = ImVec4(0.00f, 0.50f, 0.65f, 0.40f);
-        c[ImGuiCol_HeaderHovered]      = ImVec4(0.00f, 0.65f, 0.80f, 0.55f);
-        c[ImGuiCol_HeaderActive]       = ImVec4(0.00f, 0.83f, 1.00f, 0.60f);
+        c[ImGuiCol_Header]             = ImVec4(kAccent.x, kAccent.y, kAccent.z, 0.14f);
+        c[ImGuiCol_HeaderHovered]      = ImVec4(kAccent.x, kAccent.y, kAccent.z, 0.24f);
+        c[ImGuiCol_HeaderActive]       = ImVec4(kAccent.x, kAccent.y, kAccent.z, 0.34f);
 
-        // Buttons
-        c[ImGuiCol_Button]             = ImVec4(0.00f, 0.45f, 0.58f, 0.55f);
-        c[ImGuiCol_ButtonHovered]      = ImVec4(0.00f, 0.65f, 0.80f, 0.75f);
-        c[ImGuiCol_ButtonActive]       = ImVec4(0.00f, 0.83f, 1.00f, 0.90f);
+        c[ImGuiCol_Button]             = ImVec4(kAccent.x, kAccent.y, kAccent.z, 0.18f);
+        c[ImGuiCol_ButtonHovered]      = ImVec4(kAccent.x, kAccent.y, kAccent.z, 0.34f);
+        c[ImGuiCol_ButtonActive]       = ImVec4(kAccent.x, kAccent.y, kAccent.z, 0.50f);
 
-        // Frame (sliders, inputs)
-        c[ImGuiCol_FrameBg]            = ImVec4(0.10f, 0.10f, 0.16f, 0.80f);
-        c[ImGuiCol_FrameBgHovered]     = ImVec4(0.00f, 0.50f, 0.65f, 0.45f);
-        c[ImGuiCol_FrameBgActive]      = ImVec4(0.00f, 0.65f, 0.80f, 0.55f);
+        c[ImGuiCol_FrameBg]            = ImVec4(0.075f, 0.085f, 0.115f, 0.90f);
+        c[ImGuiCol_FrameBgHovered]     = ImVec4(kAccent.x, kAccent.y, kAccent.z, 0.18f);
+        c[ImGuiCol_FrameBgActive]      = ImVec4(kAccent.x, kAccent.y, kAccent.z, 0.28f);
 
-        // Tabs
-        c[ImGuiCol_Tab]                = ImVec4(0.08f, 0.08f, 0.14f, 1.00f);
-        c[ImGuiCol_TabHovered]         = ImVec4(0.00f, 0.65f, 0.80f, 0.65f);
-        c[ImGuiCol_TabActive]          = ImVec4(0.00f, 0.50f, 0.65f, 0.80f);
-        c[ImGuiCol_TabUnfocused]       = ImVec4(0.06f, 0.06f, 0.10f, 1.00f);
-        c[ImGuiCol_TabUnfocusedActive] = ImVec4(0.00f, 0.40f, 0.55f, 0.60f);
+        c[ImGuiCol_Tab]                = ImVec4(0.060f, 0.068f, 0.095f, 1.00f);
+        c[ImGuiCol_TabHovered]         = ImVec4(kAccent.x, kAccent.y, kAccent.z, 0.35f);
+        c[ImGuiCol_TabActive]          = ImVec4(kAccent.x, kAccent.y, kAccent.z, 0.30f);
+        c[ImGuiCol_TabUnfocused]       = ImVec4(0.045f, 0.052f, 0.075f, 1.00f);
+        c[ImGuiCol_TabUnfocusedActive] = ImVec4(kAccent.x, kAccent.y, kAccent.z, 0.20f);
 
-        // Slider grab
-        c[ImGuiCol_SliderGrab]         = ImVec4(0.00f, 0.83f, 1.00f, 0.80f);
-        c[ImGuiCol_SliderGrabActive]   = ImVec4(0.00f, 0.93f, 1.00f, 1.00f);
+        c[ImGuiCol_SliderGrab]         = ImVec4(kAccent.x, kAccent.y, kAccent.z, 0.85f);
+        c[ImGuiCol_SliderGrabActive]   = ImVec4(kAccent.x, kAccent.y, kAccent.z, 1.00f);
+        c[ImGuiCol_CheckMark]          = ImVec4(kAccent.x, kAccent.y, kAccent.z, 1.00f);
 
-        // Checkbox
-        c[ImGuiCol_CheckMark]          = ImVec4(0.00f, 0.83f, 1.00f, 1.00f);
+        c[ImGuiCol_TitleBg]            = ImVec4(0.030f, 0.035f, 0.052f, 1.00f);
+        c[ImGuiCol_TitleBgActive]      = ImVec4(0.035f, 0.040f, 0.060f, 1.00f);
+        c[ImGuiCol_TitleBgCollapsed]   = ImVec4(0.030f, 0.035f, 0.052f, 0.85f);
 
-        // Title bar
-        c[ImGuiCol_TitleBg]            = ImVec4(0.04f, 0.04f, 0.07f, 1.00f);
-        c[ImGuiCol_TitleBgActive]      = ImVec4(0.05f, 0.05f, 0.09f, 1.00f);
-        c[ImGuiCol_TitleBgCollapsed]   = ImVec4(0.03f, 0.03f, 0.06f, 0.80f);
+        c[ImGuiCol_ScrollbarBg]        = ImVec4(0.030f, 0.035f, 0.052f, 0.60f);
+        c[ImGuiCol_ScrollbarGrab]      = ImVec4(kAccent.x, kAccent.y, kAccent.z, 0.30f);
+        c[ImGuiCol_ScrollbarGrabHovered] = ImVec4(kAccent.x, kAccent.y, kAccent.z, 0.55f);
+        c[ImGuiCol_ScrollbarGrabActive]  = ImVec4(kAccent.x, kAccent.y, kAccent.z, 0.80f);
 
-        // Scrollbar
-        c[ImGuiCol_ScrollbarBg]        = ImVec4(0.04f, 0.04f, 0.08f, 0.50f);
-        c[ImGuiCol_ScrollbarGrab]      = ImVec4(0.00f, 0.50f, 0.65f, 0.50f);
-        c[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.00f, 0.65f, 0.80f, 0.70f);
-        c[ImGuiCol_ScrollbarGrabActive]  = ImVec4(0.00f, 0.83f, 1.00f, 0.90f);
+        c[ImGuiCol_Text]               = ImVec4(0.88f, 0.92f, 0.94f, 1.00f);
+        c[ImGuiCol_TextDisabled]       = ImVec4(0.42f, 0.46f, 0.50f, 1.00f);
 
-        // Text
-        c[ImGuiCol_Text]               = ImVec4(0.90f, 0.93f, 0.96f, 1.00f);
-        c[ImGuiCol_TextDisabled]       = ImVec4(0.40f, 0.43f, 0.46f, 1.00f);
+        c[ImGuiCol_Separator]          = ImVec4(kAccent.x, kAccent.y, kAccent.z, 0.14f);
+        c[ImGuiCol_SeparatorHovered]   = ImVec4(kAccent.x, kAccent.y, kAccent.z, 0.35f);
+        c[ImGuiCol_SeparatorActive]    = ImVec4(kAccent.x, kAccent.y, kAccent.z, 0.55f);
 
-        // Separator
-        c[ImGuiCol_Separator]          = ImVec4(0.00f, 0.83f, 1.00f, 0.20f);
-        c[ImGuiCol_SeparatorHovered]   = ImVec4(0.00f, 0.83f, 1.00f, 0.40f);
-        c[ImGuiCol_SeparatorActive]    = ImVec4(0.00f, 0.83f, 1.00f, 0.60f);
+        c[ImGuiCol_ResizeGrip]         = ImVec4(kAccent.x, kAccent.y, kAccent.z, 0.20f);
+        c[ImGuiCol_ResizeGripHovered]  = ImVec4(kAccent.x, kAccent.y, kAccent.z, 0.50f);
+        c[ImGuiCol_ResizeGripActive]   = ImVec4(kAccent.x, kAccent.y, kAccent.z, 0.80f);
 
-        // Resize grip
-        c[ImGuiCol_ResizeGrip]         = ImVec4(0.00f, 0.83f, 1.00f, 0.20f);
-        c[ImGuiCol_ResizeGripHovered]  = ImVec4(0.00f, 0.83f, 1.00f, 0.50f);
-        c[ImGuiCol_ResizeGripActive]   = ImVec4(0.00f, 0.83f, 1.00f, 0.80f);
-
-        // Rounding & spacing
-        s.WindowRounding    = 12.0f;
+        s.WindowRounding    = 10.0f;
         s.ChildRounding     = 8.0f;
         s.FrameRounding     = 6.0f;
         s.GrabRounding      = 6.0f;
@@ -96,17 +84,20 @@ namespace C4pt0r::Menu
         s.WindowBorderSize  = 1.0f;
         s.FrameBorderSize   = 0.0f;
         s.TabBorderSize     = 0.0f;
-        s.ScrollbarSize     = 12.0f;
+        s.ScrollbarSize     = 11.0f;
         s.GrabMinSize       = 9.0f;
+        (void)A;
     }
 
-    // ---- Helpers --------------------------------------------------------
     static void SectionHeader(const char* label) {
         ImGui::Spacing();
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.00f, 0.83f, 1.00f, 1.00f));
+        ImVec2 p = ImGui::GetCursorScreenPos();
+        ImGui::GetWindowDrawList()->AddRectFilled(
+            p, ImVec2(p.x + 3, p.y + ImGui::GetFontSize()), kAccentU);
+        ImGui::PushStyleColor(ImGuiCol_Text, kAccent);
+        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 8);
         ImGui::TextUnformatted(label);
         ImGui::PopStyleColor();
-        ImGui::Separator();
         ImGui::Spacing();
     }
 
@@ -120,21 +111,65 @@ namespace C4pt0r::Menu
         }
     }
 
-    // Sidebar tab button — cyan-filled when active
+    static bool Switch(const char* label, bool* v)
+    {
+        ImGui::PushID(label);
+        ImVec2 p = ImGui::GetCursorScreenPos();
+        float h  = 20.0f, w = 38.0f;
+        float labelW = ImGui::CalcTextSize(label).x;
+        ImGui::InvisibleButton("##sw", ImVec2(w + 8 + labelW, h));
+
+        static std::unordered_map<ImGuiID, float> s_Anim;
+        ImGuiID id = ImGui::GetID("##sw");
+        float& t = s_Anim[id];
+        float target = *v ? 1.0f : 0.0f;
+        t += (target - t) * ImGui::GetIO().DeltaTime * 12.0f;
+
+        bool clicked = ImGui::IsItemClicked();
+        if (clicked) *v = !*v;
+        bool hov = ImGui::IsItemHovered();
+
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        ImU32 bg = ImGui::GetColorU32(ImVec4(
+            kAccent.x * t + 0.10f * (1.0f - t),
+            kAccent.y * t + 0.12f * (1.0f - t),
+            kAccent.z * t + 0.16f * (1.0f - t), 1.0f));
+        dl->AddRectFilled(p, ImVec2(p.x + w, p.y + h), bg, h * 0.5f);
+        if (hov)
+            dl->AddRect(p, ImVec2(p.x + w, p.y + h), kAccentU, h * 0.5f);
+        float r = h * 0.5f - 3.0f;
+        float kx = p.x + 3.0f + r + t * (w - 6.0f - r * 2.0f);
+        dl->AddCircleFilled(ImVec2(kx, p.y + h * 0.5f), r,
+                            IM_COL32(235, 245, 244, 255));
+        dl->AddText(ImVec2(p.x + w + 8, p.y + (h - ImGui::GetFontSize()) * 0.5f),
+                    ImGui::GetColorU32(*v ? ImVec4(0.92f, 0.96f, 0.97f, 1.0f)
+                                          : ImVec4(0.62f, 0.66f, 0.70f, 1.0f)),
+                    label);
+        ImGui::PopID();
+        return clicked;
+    }
+
     static bool SideTab(const char* label, int idx, float width)
     {
         bool active = (g_Menu.currentTab == idx);
-        if (active) {
-            ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.00f, 0.55f, 0.70f, 0.85f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.00f, 0.65f, 0.80f, 0.90f));
-            ImGui::PushStyleColor(ImGuiCol_Text,          ImVec4(1.00f, 1.00f, 1.00f, 1.00f));
-        } else {
-            ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.08f, 0.09f, 0.13f, 0.60f));
-            ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.00f, 0.45f, 0.58f, 0.60f));
-            ImGui::PushStyleColor(ImGuiCol_Text,          ImVec4(0.70f, 0.75f, 0.80f, 1.00f));
-        }
-        bool clicked = ImGui::Button(label, ImVec2(width, 40));
+        ImVec2 p = ImGui::GetCursorScreenPos();
+        float h = 34.0f;
+        if (active)
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(kAccent.x, kAccent.y, kAccent.z, 0.13f));
+        else
+            ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
+                              ImVec4(kAccent.x, kAccent.y, kAccent.z, 0.10f));
+        ImGui::PushStyleColor(ImGuiCol_Text,
+            active ? kAccent : ImVec4(0.60f, 0.65f, 0.70f, 1.00f));
+        ImGui::PushStyleVar(ImGuiStyleVar_ButtonTextAlign, ImVec2(0.16f, 0.5f));
+        bool clicked = ImGui::Button(label, ImVec2(width, h));
+        ImGui::PopStyleVar();
         ImGui::PopStyleColor(3);
+        if (active) {
+            ImGui::GetWindowDrawList()->AddRectFilled(
+                p, ImVec2(p.x + 3, p.y + h), kAccentU);
+        }
         if (clicked) g_Menu.currentTab = idx;
         return clicked;
     }
@@ -150,13 +185,11 @@ namespace C4pt0r::Menu
             ImGui::SetTooltip("Em breve");
     }
 
-    // ---- Tab renderers --------------------------------------------------
-
     static void TabCombat()
     {
         SectionHeader("AIMBOT");
 
-        ImGui::Checkbox("Ativar Aimbot", &g_Aimbot.enabled);
+        Switch("Ativar Aimbot", &g_Aimbot.enabled);
         Tooltip("Mira automatica nos jogadores proximos.");
 
         if (g_Aimbot.enabled) {
@@ -166,18 +199,18 @@ namespace C4pt0r::Menu
             ImGui::SliderFloat("Smooth##aim", &g_Aimbot.smooth, 1.0f, 20.0f, "%.1f");
             Tooltip("1 = snap instantaneo, maior = mais suave e humano.");
 
-            ImGui::Checkbox("Apenas visiveis##aim", &g_Aimbot.visibleOnly);
+            Switch("Apenas visiveis##aim", &g_Aimbot.visibleOnly);
 
             const char* bones[] = { "Cabeca", "Pescoco", "Peito" };
             ImGui::Combo("Osso alvo##aim", &g_Aimbot.targetBone, bones, IM_ARRAYSIZE(bones));
         }
 
         SectionHeader("NO RECOIL");
-        ImGui::Checkbox("Ativar No Recoil", &g_Player.noRecoil);
+        Switch("Ativar No Recoil", &g_Player.noRecoil);
         Tooltip("Cancela o recuo da arma salvando/restaurando o pitch da camera.");
 
         SectionHeader("ARMA");
-        ImGui::Checkbox("Municao infinita", &g_Player.infiniteAmmo);
+        Switch("Municao infinita", &g_Player.infiniteAmmo);
         Tooltip("O pente nunca esvazia — nao precisa recarregar.");
     }
 
@@ -185,15 +218,15 @@ namespace C4pt0r::Menu
     {
         SectionHeader("ESP");
 
-        ImGui::Checkbox("Ativar ESP", &g_ESP.enabled);
+        Switch("Ativar ESP", &g_ESP.enabled);
         Tooltip("Mostra jogadores atraves das paredes.");
 
         if (g_ESP.enabled) {
-            ImGui::Checkbox("Caixas##esp",         &g_ESP.boxes);
-            ImGui::Checkbox("Nomes##esp",          &g_ESP.names);
-            ImGui::Checkbox("Barras de vida##esp",  &g_ESP.healthBars);
-            ImGui::Checkbox("Snaplines##esp",      &g_ESP.snaplines);
-            ImGui::Checkbox("Distancia##esp",      &g_ESP.distance);
+            Switch("Caixas##esp",         &g_ESP.boxes);
+            Switch("Nomes##esp",          &g_ESP.names);
+            Switch("Barras de vida##esp",  &g_ESP.healthBars);
+            Switch("Snaplines##esp",      &g_ESP.snaplines);
+            Switch("Distancia##esp",      &g_ESP.distance);
 
             ImGui::SliderFloat("Dist. maxima##esp", &g_ESP.maxDistance, 50.0f, 2000.0f, "%.0f m");
 
@@ -215,37 +248,37 @@ namespace C4pt0r::Menu
     {
         SectionHeader("PROTECAO");
 
-        ImGui::Checkbox("Godmode", &g_Player.godmode);
+        Switch("Godmode", &g_Player.godmode);
         Tooltip("Invencivel — vida nao abaixa.");
 
-        ImGui::Checkbox("Invisivel", &g_Player.invisible);
+        Switch("Invisivel", &g_Player.invisible);
         Tooltip("Outros jogadores nao te veem.");
 
         SectionHeader("MOVIMENTO");
 
-        ImGui::Checkbox("Speed Hack", &g_Player.speedHack);
+        Switch("Speed Hack", &g_Player.speedHack);
         if (g_Player.speedHack) {
             ImGui::SliderFloat("Multiplicador##spd", &g_Player.speedMultiplier, 1.0f, 10.0f, "%.1fx");
         }
 
-        ImGui::Checkbox("Noclip", &g_Player.noclip);
+        Switch("Noclip", &g_Player.noclip);
         Tooltip("Voar atraves de paredes. WASD + Space/Ctrl.");
         if (g_Player.noclip) {
             ImGui::SliderFloat("Velocidade##noclip", &g_Player.noclipSpeed, 0.5f, 20.0f, "%.1f");
         }
 
         SectionHeader("EFEITOS");
-        ImGui::Checkbox("Super pulo", &g_Fun.superJump);
+        Switch("Super pulo", &g_Fun.superJump);
         ImGui::SameLine();
-        ImGui::Checkbox("Nunca procurado", &g_Fun.noWanted);
-        ImGui::Checkbox("Policia me ignora", &g_Fun.policeIgnore);
+        Switch("Nunca procurado", &g_Fun.noWanted);
+        Switch("Policia me ignora", &g_Fun.policeIgnore);
         ImGui::SameLine();
-        ImGui::Checkbox("Todos me ignoram", &g_Fun.everyoneIgnore);
-        ImGui::Checkbox("Bebado", &g_Fun.drunk);
+        Switch("Todos me ignoram", &g_Fun.everyoneIgnore);
+        Switch("Bebado", &g_Fun.drunk);
         ImGui::SameLine();
-        ImGui::Checkbox("Visao termica", &g_Fun.thermal);
+        Switch("Visao termica", &g_Fun.thermal);
         ImGui::SameLine();
-        ImGui::Checkbox("Visao noturna", &g_Fun.nightvision);
+        Switch("Visao noturna", &g_Fun.nightvision);
 
         SectionHeader("EMERGENCIA");
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.55f, 0.12f, 0.16f, 0.80f));
@@ -256,7 +289,6 @@ namespace C4pt0r::Menu
         Tooltip("Desfaz invisivel, colisao, godmode, velocidade — se algo ficar 'preso'.");
     }
 
-    // Presets de teleporte (aproximados — GTA V map)
     struct TpPreset { const char* name; float x, y, z; };
     static const TpPreset s_Presets[] = {
         { "Praca (Legion Square)",      215.8f,  -923.3f,  30.7f },
@@ -266,14 +298,12 @@ namespace C4pt0r::Menu
         { "Sul (Porto de LS)",          -505.4f, -2323.7f,  6.4f },
     };
 
-    static int s_SelPlayer = -1;   // alvo compartilhado: Jogadores + Lua
+    static int s_SelPlayer = -1;
 
-    // ---- JOGADORES: lista, acoes em outros players ----------------------
     static void TabPlayers()
     {
         SectionHeader("JOGADORES ONLINE");
 
-        // try_lock: nunca deixar a thread de render travar no mutex
         if (g_DataMutex.try_lock_for(std::chrono::milliseconds(10))) {
             ImGui::BeginChild("##plist", ImVec2(0, 150), ImGuiChildFlags_Border);
             if (g_PlayerListCount == 0) {
@@ -293,7 +323,6 @@ namespace C4pt0r::Menu
             g_DataMutex.unlock();
         }
 
-        // TP direto por ID digitado — nao precisa selecionar na lista
         static int s_IdInput = 0;
         ImGui::SetNextItemWidth(-70);
         ImGui::InputInt("ID do jogador##pid", &s_IdInput);
@@ -337,7 +366,6 @@ namespace C4pt0r::Menu
         }
     }
 
-    // ---- LUA: executor dentro do ScRT — TriggerServerEvent de verdade ---
     static void TabLua()
     {
         SectionHeader("LUA EXECUTOR");
@@ -373,6 +401,9 @@ namespace C4pt0r::Menu
         if (ImGui::Button("REVIVER EU", ImVec2(-1, 30))) {
             g_Lua.preset = 4; g_Lua.targetId = -1;
         }
+        if (ImGui::Button("TRAZER ATE MIM (server)", ImVec2(-1, 30))) {
+            g_Lua.preset = 5; g_Lua.targetId = s_SelPlayer;
+        }
         ImGui::EndDisabled();
         Tooltip("Cada botao dispara a bateria de eventos conhecidos de "
                 "scripts de medico/carry. Se a cidade usar um deles, "
@@ -387,7 +418,6 @@ namespace C4pt0r::Menu
                 "GetPlayerServerId(12))");
     }
 
-    // ---- Teleporte: waypoint, presets, coords, posicoes salvas -----------
     static void TabTeleport()
     {
         SectionHeader("TELEPORTE RAPIDO");
@@ -397,7 +427,6 @@ namespace C4pt0r::Menu
         }
         Tooltip("Marca um ponto no mapa (esc) e teleporta pra la.");
 
-        // ---- Presets ----
         static int s_Preset = 0;
         const char* names[IM_ARRAYSIZE(s_Presets)];
         for (int i = 0; i < IM_ARRAYSIZE(s_Presets); ++i) names[i] = s_Presets[i].name;
@@ -409,7 +438,6 @@ namespace C4pt0r::Menu
             g_Teleport.toCoords = true;
         }
 
-        // ---- Coords ----
         static float s_Coords[3] = {};
         ImGui::SetNextItemWidth(-1);
         ImGui::InputFloat3("X, Y, Z##tp", s_Coords, "%.1f");
@@ -420,10 +448,9 @@ namespace C4pt0r::Menu
             g_Teleport.toCoords = true;
         }
 
-        // ---- Saved position ----
         if (ImGui::Button("Salvar posicao atual", ImVec2(-1, 30))) {
             g_Teleport.hasSaved = true;
-            g_Teleport.savedX = g_Teleport.savedY = g_Teleport.savedZ = 0; // re-captura no tick
+            g_Teleport.savedX = g_Teleport.savedY = g_Teleport.savedZ = 0;
         }
 
         if (g_Teleport.hasSaved) {
@@ -435,7 +462,6 @@ namespace C4pt0r::Menu
         }
     }
 
-    // ---- MUNDO: clima, tempo, gravidade, caos, spawns, veiculo fun -------
     static void TabMundo()
     {
         SectionHeader("CLIMA");
@@ -458,14 +484,14 @@ namespace C4pt0r::Menu
         ImGui::SliderInt("Minuto##clk", &g_Fun.clockM, 0, 59);
         if (ImGui::Button("Aplicar hora", ImVec2(150,0))) g_Fun.setClock = true;
         ImGui::SameLine();
-        ImGui::Checkbox("Congelar tempo", &g_Fun.pauseTime);
+        Switch("Congelar tempo", &g_Fun.pauseTime);
 
         static const char* gravNames[] = { "Terra (normal)", "Lua", "Muito baixa" };
         ImGui::Combo("Gravidade##g", &g_Fun.gravity, gravNames, IM_ARRAYSIZE(gravNames));
         ImGui::SameLine();
         if (ImGui::Button("Aplicar##g", ImVec2(90,0))) g_Fun.setGravity = true;
 
-        ImGui::Checkbox("Camera lenta", &g_Fun.slowmo);
+        Switch("Camera lenta", &g_Fun.slowmo);
         if (g_Fun.slowmo)
             ImGui::SliderFloat("Escala##ts", &g_Fun.timeScale, 0.05f, 1.0f, "%.2fx");
 
@@ -499,9 +525,9 @@ namespace C4pt0r::Menu
         ImGui::SetNextItemWidth(-1);
         ImGui::InputTextWithHint("##pedmodel", "ou digite o modelo (ex: a_c_seagull)",
                                  s_PedModel, sizeof(s_PedModel));
-        ImGui::Checkbox("Guarda-costas (te segue)", &g_Fun.pedBodyguard);
+        Switch("Guarda-costas (te segue)", &g_Fun.pedBodyguard);
         ImGui::SameLine();
-        ImGui::Checkbox("Hostil", &g_Fun.pedHostile);
+        Switch("Hostil", &g_Fun.pedHostile);
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.00f, 0.55f, 0.30f, 0.80f));
         if (ImGui::Button("SPAWNAR PED", ImVec2(-1, 34))) {
             const char* m = s_PedModel[0] ? s_PedModel : pedModels[s_PedIdx];
@@ -512,7 +538,6 @@ namespace C4pt0r::Menu
         Tooltip("Spawn local — em RP serio outros jogadores podem nao ver.");
     }
 
-    // ---- Veiculo: spawn + mecanico completo em qualquer lugar ------------
     static void TabVeiculo()
     {
         SectionHeader("SPAWN DE VEICULO");
@@ -532,7 +557,7 @@ namespace C4pt0r::Menu
         ImGui::InputTextWithHint("##vehmodel", "ou digite o modelo (ex: zentorno)",
                                  s_CustomModel, sizeof(s_CustomModel));
 
-        ImGui::Checkbox("Entrar no veiculo ao spawnar##veh", &g_Vehicle.warpIn);
+        Switch("Entrar no veiculo ao spawnar##veh", &g_Vehicle.warpIn);
 
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.00f, 0.55f, 0.30f, 0.80f));
         if (ImGui::Button("SPAWNAR VEICULO", ImVec2(-1, 34))) {
@@ -544,7 +569,7 @@ namespace C4pt0r::Menu
         Tooltip("Spawn so funciona se o servidor permitir criacao de entidades.");
 
         SectionHeader("ALVO");
-        ImGui::Checkbox("Veiculo mais proximo (em vez do que estou dentro)",
+        Switch("Veiculo mais proximo (em vez do que estou dentro)",
                         &g_Mech.useNearest);
         ImGui::TextDisabled("Busca num raio de 25m. -1 = nao alterar.");
         if (g_Mech.status[0])
@@ -556,11 +581,11 @@ namespace C4pt0r::Menu
         ImGui::SliderInt("Cambio",       &g_Mech.trans,  -1, 3);
         ImGui::SliderInt("Suspensao",    &g_Mech.susp,   -1, 4);
         ImGui::SliderInt("Blindagem",    &g_Mech.armor,  -1, 4);
-        ImGui::Checkbox("Turbo",  &g_Mech.turbo);
+        Switch("Turbo",  &g_Mech.turbo);
         ImGui::SameLine();
-        ImGui::Checkbox("Xenon",  &g_Mech.xenon);
+        Switch("Xenon",  &g_Mech.xenon);
         ImGui::SameLine();
-        ImGui::Checkbox("Pneus a prova de bala", &g_Mech.bpTires);
+        Switch("Pneus a prova de bala", &g_Mech.bpTires);
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.00f, 0.55f, 0.30f, 0.80f));
         if (ImGui::Button("MAX PERFORMANCE", ImVec2(-1, 32))) {
             g_Mech.engine = 4; g_Mech.brakes = 3; g_Mech.trans = 3;
@@ -584,7 +609,7 @@ namespace C4pt0r::Menu
         ImGui::SliderInt("Adesivo/livery", &g_Mech.livery, -1, 5);
 
         SectionHeader("CORES");
-        ImGui::Checkbox("Cor personalizada (RGB)", &g_Mech.useCustomCol);
+        Switch("Cor personalizada (RGB)", &g_Mech.useCustomCol);
         if (g_Mech.useCustomCol) {
             ImGui::ColorEdit3("Primaria",   g_Mech.primRgb);
             ImGui::ColorEdit3("Secundaria", g_Mech.secRgb);
@@ -598,7 +623,7 @@ namespace C4pt0r::Menu
             g_Mech.applyColors = true;
 
         SectionHeader("NEON / VIDRO / FUMACA");
-        ImGui::Checkbox("Neon ligado", &g_Mech.neonOn);
+        Switch("Neon ligado", &g_Mech.neonOn);
         ImGui::ColorEdit3("Cor neon",       g_Mech.neonRgb);
         ImGui::ColorEdit3("Fumaca pneus",   g_Mech.smokeRgb);
         ImGui::SliderInt("Vidro fume", &g_Mech.winTint, -1, 6);
@@ -653,7 +678,6 @@ namespace C4pt0r::Menu
         ImGui::TextDisabled("Garagem local — vale enquanto o jogo esta aberto.");
     }
 
-    // ---- Armas -------------------------------------------------------------
     static const char* kWeaponNames[] = {
         "Carabina","Rifle de assalto","Carabina especial","Rifle avancado",
         "Pistola","Pistola de combate","Pistola AP","Pistola .50",
@@ -691,7 +715,7 @@ namespace C4pt0r::Menu
                          sizeof(g_Weapon.model));
         Tooltip("Modelo da arma, ex: weapon_carbinerifle. O combo acima preenche ao dar.");
         ImGui::SliderInt("Municao", &g_Weapon.ammo, 0, 9999);
-        ImGui::Checkbox("Com acessorios (mira, silenciador...)", &g_Weapon.attachments);
+        Switch("Com acessorios (mira, silenciador...)", &g_Weapon.attachments);
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.00f, 0.55f, 0.30f, 0.80f));
         if (ImGui::Button("DAR ARMA", ImVec2(-1, 34))) {
             strncpy_s(g_Weapon.model, kWeaponModels[s_WIdx],
@@ -717,7 +741,7 @@ namespace C4pt0r::Menu
     {
         SectionHeader("INSPECTOR AO VIVO");
 
-        ImGui::Checkbox("Atualizar inspector", &g_Farm.inspEnabled);
+        Switch("Atualizar inspector", &g_Farm.inspEnabled);
         if (g_Farm.inspEnabled) {
             const auto& d = g_Inspector;
             ImGui::Text("Nome:    %s", d.name[0] ? d.name : "-");
@@ -740,7 +764,6 @@ namespace C4pt0r::Menu
             }
             if (!any) ImGui::TextDisabled("  (nenhum — aperte E/F/G/R...)");
 
-            // control id cheatsheet
             ImGui::Spacing();
             ImGui::TextDisabled("IDs: 51=E(contexto) 38=E(pickup) 75=F 47=G 45=R 244=M");
         }
@@ -800,7 +823,7 @@ namespace C4pt0r::Menu
     {
         SectionHeader("MENU");
 
-        ImGui::Checkbox("Watermark", &g_Menu.showWatermark);
+        Switch("Watermark", &g_Menu.showWatermark);
         ImGui::TextDisabled("Tecla do menu: F9");
         ImGui::TextDisabled("Panic key (unload): END");
 
@@ -826,31 +849,64 @@ namespace C4pt0r::Menu
                    "https://www.youtube.com/channel/UCX5aJEgyvTqUyR4awSAx8ig/", -1);
 
         SectionHeader("INFO");
-        ImGui::TextDisabled("C4pt0r Cheats v1.7");
+        ImGui::TextDisabled("C4pt0r Cheats v2.0");
         ImGui::TextDisabled("FiveM Internal");
         ImGui::Spacing();
         ImGui::TextColored(ImVec4(0.00f, 0.83f, 1.00f, 0.7f), "by Larpbase");
     }
 
-    // ---- Main render ----------------------------------------------------
+    static void TopBar()
+    {
+        ImVec2 wpos  = ImGui::GetWindowPos();
+        ImVec2 wsize = ImGui::GetWindowSize();
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        const float barH = 38.0f;
+
+        dl->AddRectFilled(wpos, ImVec2(wpos.x + wsize.x, wpos.y + barH),
+                          IM_COL32(10, 12, 19, 255), 10.0f,
+                          ImDrawFlags_RoundCornersTop);
+        dl->AddLine(ImVec2(wpos.x, wpos.y + barH),
+                    ImVec2(wpos.x + wsize.x, wpos.y + barH),
+                    IM_COL32(33, 212, 189, 110), 1.5f);
+
+        dl->AddCircleFilled(ImVec2(wpos.x + 18, wpos.y + barH * 0.5f),
+                            5.0f, kAccentU);
+        dl->AddText(ImVec2(wpos.x + 30, wpos.y + 11),
+                    kAccentU, "C4PT0R");
+        dl->AddText(ImVec2(wpos.x + 78, wpos.y + 12),
+                    IM_COL32(110, 118, 128, 255), "mod menu");
+
+        const char* ver = "v2.0";
+        float vw = ImGui::CalcTextSize(ver).x + 16;
+        float vx = wpos.x + wsize.x - vw - 14;
+        dl->AddRectFilled(ImVec2(vx, wpos.y + 10),
+                          ImVec2(vx + vw, wpos.y + 28),
+                          IM_COL32(33, 212, 189, 45), 9.0f);
+        dl->AddText(ImVec2(vx + 8, wpos.y + 13), kAccentU, ver);
+
+        ImGui::SetCursorScreenPos(wpos);
+        ImGui::InvisibleButton("##topdrag", ImVec2(wsize.x, barH));
+        if (ImGui::IsItemActive() && ImGui::IsMouseDragging(0)) {
+            ImGui::SetWindowPos(ImVec2(
+                wpos.x + ImGui::GetIO().MouseDelta.x,
+                wpos.y + ImGui::GetIO().MouseDelta.y));
+        }
+        ImGui::SetCursorScreenPos(ImVec2(wpos.x + 14, wpos.y + barH + 6));
+    }
+
     void Render()
     {
-        ImGui::SetNextWindowSize(ImVec2(720, 540), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(740, 560), ImGuiCond_FirstUseEver);
 
-        ImGui::Begin("C4pt0r Cheats##main", &g_Menu.isOpen,
-            ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoScrollbar);
+        ImGui::Begin("C4PT0R##main", &g_Menu.isOpen,
+            ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoScrollbar |
+            ImGuiWindowFlags_NoTitleBar);
 
-        // ---- Sidebar ----
-        ImGui::BeginChild("##sidebar", ImVec2(160, 0),
+        TopBar();
+
+        ImGui::BeginChild("##sidebar", ImVec2(150, 0),
                           ImGuiChildFlags_Border | ImGuiChildFlags_ResizeX);
 
-        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.00f, 0.83f, 1.00f, 1.00f));
-        ImGui::TextUnformatted("C4pt0r");
-        ImGui::PopStyleColor();
-        ImGui::SameLine();
-        ImGui::TextDisabled("v1.7");
-
-        // indicador de saude dos natives — visivel de cara se cair
         bool nOk = Natives::IsReady();
         ImVec2 dp = ImGui::GetCursorScreenPos();
         ImGui::GetWindowDrawList()->AddCircleFilled(
@@ -858,8 +914,7 @@ namespace C4pt0r::Menu
             nOk ? IM_COL32(40, 220, 90, 255) : IM_COL32(255, 60, 70, 255));
         ImGui::Dummy(ImVec2(14, 0));
         ImGui::SameLine();
-        ImGui::TextDisabled("%s", nOk ? "natives ok" : "reconectando");
-        ImGui::Separator();
+        ImGui::TextDisabled("%s", nOk ? "online" : "reconectando");
         ImGui::Spacing();
 
         float tabW = ImGui::GetContentRegionAvail().x;
@@ -875,7 +930,6 @@ namespace C4pt0r::Menu
         SideTab("Ferramentas", 5, tabW);
         SideTab("Settings",  6, tabW);
 
-        // push links to the bottom of the sidebar
         float remain = ImGui::GetContentRegionAvail().y - 70;
         if (remain > 0) ImGui::Dummy(ImVec2(0, remain));
         ImGui::Separator();
@@ -885,7 +939,6 @@ namespace C4pt0r::Menu
         ImGui::EndChild();
         ImGui::SameLine();
 
-        // ---- Content ----
         ImGui::BeginChild("##content", ImVec2(0, 0));
 
         switch (g_Menu.currentTab) {

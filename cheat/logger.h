@@ -1,21 +1,4 @@
 #pragma once
-// ============================================================================
-//  C4pt0r Cheats — File Logger (non-blocking)
-//  Writes to %TEMP%\c4pt0r_log.txt
-//
-//  POR QUE NAO PODE BLOQUEAR (o que matou o cheat):
-//  - fprintf/fflush tomam um lock interno do CRT no FILE. Se a thread
-//    trava dentro (WriteFile segurado por scan de AV/EDR), TODO thread que
-//    logar depois trava junto — inclusive o supervisor, que nunca escreve
-//    o "SUPERVISOR". Log em silencio = cheat morto sem rastro.
-//  - OutputDebugStringA pega o DBWinMutex (mutex GLOBAL do sistema) —
-//    pode bloquear por outros processos.
-//
-//  Agora: WriteFile overlapped (retorna na hora, kernel escreve async) +
-//  flag atomica — se uma thread ja esta dentro, as outras pulam o write
-//  em vez de esperar. Buffers persistentes (o write async le depois de
-//  voltar), rotacionados entre 32 slots.
-// ============================================================================
 
 #include <Windows.h>
 #include <cstdio>
@@ -27,9 +10,9 @@ namespace C4pt0r::Log
 {
     inline HANDLE            g_File   = INVALID_HANDLE_VALUE;
     inline char              g_Path[MAX_PATH] = {};
-    inline std::atomic<bool> g_Busy{false};       // false = livre
-    inline LARGE_INTEGER     g_Offset{};          // posicao do append async
-    inline char              g_Slots[32][1200] = {}; // buffers p/ writes async
+    inline std::atomic<bool> g_Busy{false};
+    inline LARGE_INTEGER     g_Offset{};
+    inline char              g_Slots[32][1200] = {};
     inline int               g_Slot = 0;
 
     inline void RawWrite(const char* text, int len) {
@@ -44,7 +27,7 @@ namespace C4pt0r::Log
         ov.OffsetHigh = g_Offset.HighPart;
         g_Offset.QuadPart += n;
         DWORD w = 0;
-        WriteFile(g_File, line, n, &w, &ov);  // overlapped: nunca bloqueia
+        WriteFile(g_File, line, n, &w, &ov);
     }
 
     inline void Init() {
@@ -64,8 +47,6 @@ namespace C4pt0r::Log
         vsnprintf(buf, sizeof(buf), fmt, args);
         va_end(args);
 
-        // outra thread no meio de um write? pula — log nunca pode parar
-        // o cheat. (feature/supervisor seguem via atomics p/ diagnostico)
         if (g_Busy.exchange(true)) return;
 
         SYSTEMTIME st;
@@ -78,9 +59,6 @@ namespace C4pt0r::Log
         g_Busy = false;
     }
 
-    // Write SINCRONO (append via handle novo + WriteFile bloqueante).
-    // So pra etapas antes de codigo perigoso: garante que a linha chega
-    // no disco mesmo se o processo morrer no proximo native call.
     inline void Step(const char* fmt, ...) {
         char buf[1024];
         va_list args;
@@ -101,16 +79,14 @@ namespace C4pt0r::Log
         WriteFile(h, line, n, &w, nullptr);
         FlushFileBuffers(h);
         CloseHandle(h);
-        // o writer async usa g_Offset proprio — sem isso, a proxima linha
-        // normal sobrescreve o STEP que acabou de sair (apagava os logs
-        // de diagnostico do crash no arquivo final).
+
         InterlockedAdd64((volatile LONG64*)&g_Offset.QuadPart, n);
     }
 
     inline void Close() {
         Write("=== Log closed ===");
         if (g_File != INVALID_HANDLE_VALUE) {
-            CancelIoEx(g_File, nullptr);   // descarta writes pendentes
+            CancelIoEx(g_File, nullptr);
             CloseHandle(g_File);
             g_File = INVALID_HANDLE_VALUE;
         }

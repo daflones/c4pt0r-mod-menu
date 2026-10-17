@@ -1,8 +1,4 @@
 #pragma once
-// ============================================================================
-//  C4pt0r Cheats — Memory Utilities
-//  Pattern scanner, read/write helpers, pointer chain resolution
-// ============================================================================
 
 #include <Windows.h>
 #include <Psapi.h>
@@ -14,7 +10,7 @@
 
 namespace C4pt0r::Memory
 {
-    // ---- Module helpers -------------------------------------------------
+
     inline uintptr_t GetModuleBase(const wchar_t* name = nullptr) {
         return reinterpret_cast<uintptr_t>(GetModuleHandleW(name));
     }
@@ -27,9 +23,6 @@ namespace C4pt0r::Memory
         return mi.SizeOfImage;
     }
 
-    // ---- AOB pattern scan -----------------------------------------------
-    // Pattern string: "48 8B 05 ?? ?? ?? ?? 48 05"
-    // '?' or '??' = wildcard byte
     inline uintptr_t PatternScan(uintptr_t start, size_t size, const char* pattern) {
         std::vector<int> bytes;
         for (const char* p = pattern; *p; ) {
@@ -66,8 +59,6 @@ namespace C4pt0r::Memory
         size_t    size = GetModuleSize(moduleName);
         if (!base || !size) return 0;
 
-        // Walk committed+readable pages only — a raw scan over SizeOfImage
-        // crosses guard/noaccess regions and AVs mid-scan
         uintptr_t addr = base;
         const uintptr_t end = base + size;
         while (addr < end) {
@@ -87,7 +78,6 @@ namespace C4pt0r::Memory
         return 0;
     }
 
-    // ---- Executable check — validate a resolved pointer before calling it -
     inline bool IsExecutable(uintptr_t addr) {
         if (!addr) return false;
         MEMORY_BASIC_INFORMATION mbi{};
@@ -97,7 +87,6 @@ namespace C4pt0r::Memory
         return mbi.State == MEM_COMMIT && (mbi.Protect & execMask) != 0;
     }
 
-    // ---- Readable check — validate a pointer before dereferencing a string -
     inline bool IsReadable(uintptr_t addr) {
         if (!addr) return false;
         MEMORY_BASIC_INFORMATION mbi{};
@@ -105,16 +94,11 @@ namespace C4pt0r::Memory
         return mbi.State == MEM_COMMIT && (mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD)) == 0;
     }
 
-    // ---- RIP-relative address resolution --------------------------------
-    // addr         = address of the instruction containing the offset
-    // ripOffset    = byte position of the 4-byte relative within the instruction
-    // instrLength  = total instruction length
     inline uintptr_t ResolveRIP(uintptr_t addr, int ripOffset, int instrLength) {
         auto rel = *reinterpret_cast<int32_t*>(addr + ripOffset);
         return addr + instrLength + rel;
     }
 
-    // ---- Safe read / write ----------------------------------------------
     template <typename T>
     inline T Read(uintptr_t addr) {
         if (IsBadReadPtr(reinterpret_cast<void*>(addr), sizeof(T))) return T{};
@@ -129,9 +113,6 @@ namespace C4pt0r::Memory
         VirtualProtect(reinterpret_cast<void*>(addr), sizeof(T), old, &old);
     }
 
-    // ---- Pointer chain --------------------------------------------------
-    // ReadPointerChain(base, { 0x10, 0x20, 0x30 })
-    // reads [[[base]+0x10]+0x20]+0x30
     inline uintptr_t ReadPointerChain(uintptr_t base, const std::vector<uintptr_t>& offsets) {
         uintptr_t addr = base;
         for (size_t i = 0; i < offsets.size(); ++i) {
@@ -143,7 +124,6 @@ namespace C4pt0r::Memory
         return addr;
     }
 
-    // ---- NOP a region ---------------------------------------------------
     inline void Nop(uintptr_t addr, size_t size) {
         DWORD old;
         VirtualProtect(reinterpret_cast<void*>(addr), size, PAGE_EXECUTE_READWRITE, &old);
@@ -151,7 +131,6 @@ namespace C4pt0r::Memory
         VirtualProtect(reinterpret_cast<void*>(addr), size, old, &old);
     }
 
-    // ---- Patch bytes ----------------------------------------------------
     inline void Patch(uintptr_t addr, const uint8_t* data, size_t size) {
         DWORD old;
         VirtualProtect(reinterpret_cast<void*>(addr), size, PAGE_EXECUTE_READWRITE, &old);

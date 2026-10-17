@@ -1,6 +1,5 @@
-// ============================================================================
-//  C4pt0r — Executor de Lua dentro do ScRT do FiveM (ver lua_exec.h)
-// ============================================================================
+
+
 #include "lua_exec.h"
 #include "logger.h"
 #include "deps/minhook/include/MinHook.h"
@@ -11,7 +10,7 @@
 
 namespace C4pt0r::LuaExec
 {
-    // ---- Tipos Lua (ABI C, x64 — args extras sao ignorados com seguranca) --
+
     typedef void* lua_State;
     typedef int (*lua_CFunction)(lua_State*);
     typedef int (*lua_resume_fn)(lua_State*, lua_State*, int, int*);
@@ -23,7 +22,6 @@ namespace C4pt0r::LuaExec
     typedef const char* (*lua_tostring_fn)(lua_State*, int);
     typedef void (*lua_settop_fn)(lua_State*, int);
 
-    // ---- Estado resolvido --------------------------------------------------
     static HMODULE            s_Dll       = nullptr;
     static std::atomic<lua_State*> s_State{nullptr};
     static luaL_loadbufferx_fn s_LoadBuf  = nullptr;
@@ -35,7 +33,6 @@ namespace C4pt0r::LuaExec
     static bool                s_InitDone = false;
     static int                 s_InitTries = 0;
 
-    // ---- Hooks de captura --------------------------------------------------
     static lua_resume_fn s_OrigResume = nullptr;
     static lua_pcallk_fn s_OrigPcallk = nullptr;
     static lua_call_fn   s_OrigCall   = nullptr;
@@ -69,9 +66,9 @@ namespace C4pt0r::LuaExec
 
     void Init()
     {
-        if (s_State.load()) return;                 // ja temos um state
-        if (s_InitDone && s_Dll) return;            // hooks postos, esperando
-        if (++s_InitTries > 200) return;            // desiste depois de ~100s
+        if (s_State.load()) return;
+        if (s_InitDone && s_Dll) return;
+        if (++s_InitTries > 200) return;
 
         if (!s_Dll) {
             static const wchar_t* kDlls[] = {
@@ -92,7 +89,6 @@ namespace C4pt0r::LuaExec
             }
             Log::Write("LuaExec: dll achada.");
 
-            // funcoes de execucao
             s_LoadBuf  = (luaL_loadbufferx_fn)GetProcAddress(s_Dll, "luaL_loadbufferx");
             s_LoadStr  = (luaL_loadstring_fn )GetProcAddress(s_Dll, "luaL_loadstring");
             s_Pcallk   = (lua_pcallk_fn      )GetProcAddress(s_Dll, "lua_pcallk");
@@ -105,7 +101,6 @@ namespace C4pt0r::LuaExec
                 return;
             }
 
-            // hooks de captura de lua_State — qualquer um que disparar serve
             MH_Initialize();
             HookSym(s_Dll, "lua_resume", (void*)hk_resume, (void**)&s_OrigResume);
             HookSym(s_Dll, "lua_pcallk", (void*)hk_pcallk, (void**)&s_OrigPcallk);
@@ -146,7 +141,7 @@ namespace C4pt0r::LuaExec
             if (s_SetTop) s_SetTop(L, 0);
             return st;
         }
-        st = s_Pcallk(L, 0, -1 /*LUA_MULTRET*/, 0, 0, nullptr);
+        st = s_Pcallk(L, 0, -1 , 0, 0, nullptr);
         if (st != 0) {
             const char* e = s_ToString ? s_ToString(L, -1) : "?";
             Log::Write("LuaExec: erro runtime: %s", e ? e : "?");

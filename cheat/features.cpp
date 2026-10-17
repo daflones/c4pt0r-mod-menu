@@ -1,12 +1,8 @@
-// ============================================================================
-//  C4pt0r Cheats — Feature Implementations
-//  ESP, Aimbot, Godmode, Invisibility, Speed, No Recoil, Teleport, Noclip
-// ============================================================================
+
 
 #include "features.h"
 #include "logger.h"
 
-// Prevent Windows min/max macros from breaking std::max/std::clamp
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
@@ -22,37 +18,30 @@
 #include <chrono>
 #include <cstdlib>
 
-// Math helpers
 constexpr float PI = 3.14159265358979f;
 constexpr float RAD2DEG = 180.0f / PI;
 constexpr float DEG2RAD = PI / 180.0f;
 
 namespace C4pt0r::Features
 {
-    static uint64_t FA(float f);   // fwd — definida junto do CN() mais abaixo
+    static uint64_t FA(float f);
     static bool CN(const char* n, const uint64_t* a = nullptr, int c = 0,
                    uint64_t* r = nullptr);
-    static void GrabDetach();      // fwd — definida no TickPlayerActions
+    static void GrabDetach();
 
-    // ====================================================================
-    //  Tick — called from main thread, safe to use natives
-    // ====================================================================
-
-    // ---- Godmode --------------------------------------------------------
     static void TickGodmode()
     {
         if (!g_Player.godmode) return;
         int ped = Natives::PlayerPedId();
         if (!ped) return;
         Natives::SetEntityInvincible(ped, true);
-        // Also keep health topped up
+
         int maxHp = Natives::GetEntityMaxHealth(ped);
         if (Natives::GetEntityHealth(ped) < maxHp) {
             Natives::InvokeVoid(Natives::Hash::SET_ENTITY_HEALTH, ped, maxHp);
         }
     }
 
-    // ---- Invisibility ---------------------------------------------------
     static void TickInvisible()
     {
         int ped = Natives::PlayerPedId();
@@ -60,7 +49,6 @@ namespace C4pt0r::Features
         Natives::SetEntityVisible(ped, !g_Player.invisible, false);
     }
 
-    // ---- Speed Hack -----------------------------------------------------
     static void TickSpeed()
     {
         if (!g_Player.speedHack) return;
@@ -68,7 +56,6 @@ namespace C4pt0r::Features
         Natives::SetRunSprintMultiplier(player, g_Player.speedMultiplier);
     }
 
-    // ---- No Recoil (camera pitch restoration) ---------------------------
     static float s_SavedPitch = 0.0f;
     static bool  s_WasShooting = false;
 
@@ -80,16 +67,15 @@ namespace C4pt0r::Features
 
         bool shooting = Natives::IsPedShooting(ped);
         if (shooting) {
-            // Restore pitch to what it was before the shot
+
             Natives::SetGameplayCamRelativePitch(s_SavedPitch, 1.0f);
         } else {
-            // Save current pitch when not shooting
+
             s_SavedPitch = Natives::GetGameplayCamRelativePitch();
         }
         s_WasShooting = shooting;
     }
 
-    // ---- Infinite Ammo ---------------------------------------------------
     static void TickInfiniteAmmo()
     {
         if (!g_Player.infiniteAmmo) return;
@@ -98,7 +84,6 @@ namespace C4pt0r::Features
         Natives::SetPedInfiniteAmmoClip(ped, true);
     }
 
-    // ---- Noclip ---------------------------------------------------------
     static bool s_WasNoclip = false;
 
     static void TickNoclip()
@@ -109,10 +94,6 @@ namespace C4pt0r::Features
         if (g_Player.noclip) {
             s_WasNoclip = true;
 
-            // Velocity-driven noclip: NO FreezeEntityPosition +
-            // SetEntityCoordsNoOffset loop — teleporting a ped every tick
-            // fights the physics engine and crashes the game process.
-            // Collision off + gravity off + velocity = smooth fly-through.
             Natives::SetEntityCollision(ped, false, false);
             Natives::SetEntityHasGravity(ped, false);
 
@@ -142,7 +123,7 @@ namespace C4pt0r::Features
 
             Natives::SetEntityVelocity(ped, vel.x, vel.y, vel.z);
         } else if (s_WasNoclip) {
-            // Restore physics when noclip is turned off
+
             Natives::SetEntityCollision(ped, true, true);
             Natives::SetEntityHasGravity(ped, true);
             Natives::SetEntityVelocity(ped, 0.f, 0.f, 0.f);
@@ -150,14 +131,6 @@ namespace C4pt0r::Features
         }
     }
 
-    // ---- Safe staged teleport --------------------------------------------
-    //  Teleporting far away used to crash: the destination's collision wasn't
-    //  streamed, GET_GROUND_Z failed, we landed on raw Z and fell into the
-    //  void. Now:
-    //    1) freeze ped/vehicle, move it 400m above the target, start loading
-    //       the scene there (streams collision for the ground probe)
-    //    2) poll GET_GROUND_Z each tick
-    //    3) land on real ground (or raw Z after ~5s), unfreeze, stop scene load
     static bool  s_TpBusy   = false;
     static int   s_TpEnt    = 0;
     static Vec3  s_TpTarget{};
@@ -183,9 +156,9 @@ namespace C4pt0r::Features
         if (s_TpBusy) return;
         int veh = Natives::IsPedInAnyVehicle(ped) ? Natives::GetVehiclePedIsIn(ped) : 0;
         s_TpEnt = veh ? veh : ped;
-        s_TpStart = Natives::GetEntityCoords(s_TpEnt);   // ponto de retorno seguro
+        s_TpStart = Natives::GetEntityCoords(s_TpEnt);
         Natives::FreezeEntityPosition(s_TpEnt, true);
-        // park 400m above the destination — collision starts streaming below us
+
         Natives::SetEntityCoordsNoOffset(s_TpEnt, x, y, z + 400.f);
         SceneLoad(x, y, z);
         s_TpTarget = { x, y, z };
@@ -199,7 +172,6 @@ namespace C4pt0r::Features
         int ped = Natives::PlayerPedId();
         if (!ped) return;
 
-        // Save current position when "hasSaved" first becomes true
         if (g_Teleport.hasSaved &&
             g_Teleport.savedX == 0 && g_Teleport.savedY == 0 && g_Teleport.savedZ == 0)
         {
@@ -209,15 +181,10 @@ namespace C4pt0r::Features
             g_Teleport.savedZ = pos.z;
         }
 
-        // --- staged TP in flight ---
-        //  GET_GROUND_Z e os shape-tests nao existem nesse build — entao o
-        //  pouso e por QUEDA LIVRE: stream a area, solta, e observa o Z
-        //  estabilizar (= encostou em algo solido). void/timeout aborta
-        //  pro ponto de partida.
         if (s_TpBusy) {
             ++s_TpTries;
 
-            if (s_TpTries == 45) {          // ~700ms de stream primeiro
+            if (s_TpTries == 45) {
                 Natives::FreezeEntityPosition(s_TpEnt, false);
                 s_TpLastZ = 1e9f;
                 s_TpStill = 0;
@@ -225,17 +192,17 @@ namespace C4pt0r::Features
             }
             else if (s_TpTries > 45) {
                 Vec3 p = Natives::GetEntityCoords(s_TpEnt);
-                bool stopped = (p.z >= s_TpLastZ - 0.05f);   // parou de cair
+                bool stopped = (p.z >= s_TpLastZ - 0.05f);
                 s_TpLastZ = p.z;
                 if (stopped) ++s_TpStill; else s_TpStill = 0;
 
-                if (s_TpStill >= 3) {       // ~3 ticks estavel = pousou
+                if (s_TpStill >= 3) {
                     SceneStop();
                     s_TpBusy = false;
                     Log::Write("TP: pousou em %.1f, %.1f, %.1f",
                                p.x, p.y, p.z);
                 } else if (p.z < -60.f || s_TpTries > 1200) {
-                    // void/timeout — volta pro inicio, NUNCA pousa a ceu aberto
+
                     Natives::FreezeEntityPosition(s_TpEnt, true);
                     Natives::SetEntityCoordsNoOffset(s_TpEnt, s_TpStart.x,
                         s_TpStart.y, s_TpStart.z + 0.5f);
@@ -247,8 +214,6 @@ namespace C4pt0r::Features
             }
         }
 
-        // TP to waypoint — blip PRIMEIRO (e o marcador que o jogador
-        // realmente pos no mapa); GET_WAYPOINT_COORDS direto so fallback
         if (g_Teleport.toWaypoint) {
             g_Teleport.toWaypoint = false;
             Vec3 wp = Natives::GetWaypointCoords();
@@ -261,20 +226,17 @@ namespace C4pt0r::Features
             }
         }
 
-        // TP to saved
         if (g_Teleport.toSaved) {
             g_Teleport.toSaved = false;
             if (g_Teleport.hasSaved)
                 BeginTeleport(ped, g_Teleport.savedX, g_Teleport.savedY, g_Teleport.savedZ);
         }
 
-        // TP to explicit coords / presets
         if (g_Teleport.toCoords) {
             g_Teleport.toCoords = false;
             BeginTeleport(ped, g_Teleport.tx, g_Teleport.ty, g_Teleport.tz);
         }
 
-        // TP to player id
         if (g_Teleport.toPlayerId >= 0) {
             int target = g_Teleport.toPlayerId;
             g_Teleport.toPlayerId = -1;
@@ -287,7 +249,6 @@ namespace C4pt0r::Features
             }
         }
 
-        // Bring player to me (local-only effect on most servers)
         if (g_Teleport.bringPlayerId >= 0) {
             int target = g_Teleport.bringPlayerId;
             g_Teleport.bringPlayerId = -1;
@@ -301,7 +262,6 @@ namespace C4pt0r::Features
         }
     }
 
-    // ---- Vehicle spawn (request model -> wait loaded -> create) ----------
     enum class VStage { Idle, Loading };
     static VStage   s_VStage   = VStage::Idle;
     static uint32_t s_VModel   = 0;
@@ -328,7 +288,7 @@ namespace C4pt0r::Features
 
         if (s_VStage != VStage::Loading) return;
 
-        if (++s_VTries > 120) {   // ~2s de espera
+        if (++s_VTries > 120) {
             s_VStage = VStage::Idle;
             Log::Write("Veiculo: modelo 0x%X nao carregou.", s_VModel);
             return;
@@ -346,7 +306,7 @@ namespace C4pt0r::Features
         int veh = Natives::CreateVehicle(s_VModel, spawnAt.x, spawnAt.y, spawnAt.z, head);
         if (veh) {
             Natives::SetVehicleOnGroundProperly(veh);
-            // cor guardada na garagem — aplica logo depois do spawn
+
             if (g_Vehicle.postPrim >= 0 || g_Vehicle.postSec >= 0) {
                 uint64_t a[3] = { (uint64_t)veh,
                     (uint64_t)(g_Vehicle.postPrim < 0 ? 0 : g_Vehicle.postPrim),
@@ -376,26 +336,22 @@ namespace C4pt0r::Features
         s_VStage = VStage::Idle;
     }
 
-    // ---- Fun / world features ---------------------------------------------
-    //  All natives invoked by name (joaat at runtime) — a native that doesn't
-    //  exist on this build just returns false, nothing crashes.
     static bool CN(const char* n, const uint64_t* a, int c,
                    uint64_t* r) {
         return Natives::CallByName(n, a, c, r);
     }
-    static uint64_t FA(float f) {          // float arg packed into u64 slot
+    static uint64_t FA(float f) {
         uint64_t u = 0;
         *reinterpret_cast<float*>(&u) = f;
         return u;
     }
 
-    // ---- Ped/animal spawn (request model -> wait -> create) ---------------
     enum class PStage { Idle, Loading };
     static PStage   s_PStage  = PStage::Idle;
     static uint32_t s_PModel  = 0;
     static int      s_PTries  = 0;
-    static int      s_PigLeft = 0;      // pigs left to drop from the sky
-    static bool     s_PigMode = false;  // current spawn is a falling pig
+    static int      s_PigLeft = 0;
+    static bool     s_PigMode = false;
 
     static void TickFun()
     {
@@ -404,7 +360,6 @@ namespace C4pt0r::Features
         if (!ped) return;
         Vec3 pos = Natives::GetEntityCoords(ped);
 
-        // ---------------- toggles ----------------
         if (g_Fun.superJump) {
             uint64_t a[] = { static_cast<uint64_t>(player) };
             CN("SET_SUPER_JUMP_THIS_FRAME", a, 1);
@@ -422,7 +377,6 @@ namespace C4pt0r::Features
             CN("SET_NIGHTVISION", a, 1);
         }
 
-        // edge-applied persistent toggles
         static bool s_Pol = false, s_Ev = false, s_Pause = false, s_Drunk = false;
         if (g_Fun.policeIgnore != s_Pol) {
             s_Pol = g_Fun.policeIgnore;
@@ -444,7 +398,7 @@ namespace C4pt0r::Features
             uint64_t a[] = { static_cast<uint64_t>(ped), s_Drunk ? 1ull : 0ull };
             CN("SET_PED_IS_DRUNK", a, 2);
         }
-        if (g_Fun.drunk) {   // keep the cam wobbling while drunk
+        if (g_Fun.drunk) {
             static auto lastShake = std::chrono::steady_clock::time_point{};
             auto now = std::chrono::steady_clock::now();
             if (now - lastShake > std::chrono::milliseconds(600)) {
@@ -462,7 +416,6 @@ namespace C4pt0r::Features
             if (CN("SET_TIME_SCALE", a, 1)) s_LastScale = want;
         }
 
-        // ---------------- one-shot world ----------------
         if (g_Fun.setWeather) {
             g_Fun.setWeather = false;
             static const char* wnames[] = {
@@ -490,7 +443,6 @@ namespace C4pt0r::Features
             CN("SET_GRAVITY_LEVEL", a, 1);
         }
 
-        // ---------------- chaos ----------------
         if (g_Fun.explode) {
             g_Fun.explode = false;
             float rad = Natives::GetEntityHeading(ped) * DEG2RAD;
@@ -498,11 +450,11 @@ namespace C4pt0r::Features
             a[0] = FA(pos.x - sinf(rad) * 6.f);
             a[1] = FA(pos.y + cosf(rad) * 6.f);
             a[2] = FA(pos.z);
-            a[3] = 0;               // grenade
-            a[4] = FA(1.f);         // damage scale
-            a[5] = 1;               // audible
-            a[6] = 0;               // visible
-            a[7] = FA(0.8f);        // cam shake
+            a[3] = 0;
+            a[4] = FA(1.f);
+            a[5] = 1;
+            a[6] = 0;
+            a[7] = FA(0.8f);
             CN("ADD_EXPLOSION", a, 8);
         }
         if (g_Fun.fire) {
@@ -512,8 +464,8 @@ namespace C4pt0r::Features
             a[0] = FA(pos.x - sinf(rad) * 3.f);
             a[1] = FA(pos.y + cosf(rad) * 3.f);
             a[2] = FA(pos.z);
-            a[3] = 25;              // max children
-            a[4] = 0;               // not a gas fire
+            a[3] = 25;
+            a[4] = 0;
             CN("START_SCRIPT_FIRE", a, 5);
         }
         if (g_Fun.water) {
@@ -547,7 +499,6 @@ namespace C4pt0r::Features
             s_PStage  = PStage::Loading;
         }
 
-        // ---------------- ped / animal spawning ----------------
         if (g_Fun.spawnPed) {
             g_Fun.spawnPed = false;
             const char* mdl = g_Fun.pedModel[0] ? g_Fun.pedModel : "a_m_y_hipster_01";
@@ -569,7 +520,7 @@ namespace C4pt0r::Features
                 Log::Write("Ped: modelo 0x%X nao carregou.", s_PModel);
             } else if (Natives::HasModelLoaded(s_PModel)) {
                 Vec3 at;
-                if (s_PigMode) {   // drop it from the sky
+                if (s_PigMode) {
                     at = { pos.x + static_cast<float>(rand() % 13 - 6),
                            pos.y + static_cast<float>(rand() % 13 - 6),
                            pos.z + 18.f };
@@ -581,11 +532,11 @@ namespace C4pt0r::Features
                 }
                 float head = Natives::GetEntityHeading(ped);
                 uint64_t a[8];
-                a[0] = 4;               // pedType civ
+                a[0] = 4;
                 a[1] = s_PModel;
                 a[2] = FA(at.x); a[3] = FA(at.y); a[4] = FA(at.z);
                 a[5] = FA(head);
-                a[6] = 0;               // not networked
+                a[6] = 0;
                 a[7] = 0;
                 uint64_t r[4] = {};
                 if (CN("CREATE_PED", a, 8, r) && r[0]) {
@@ -617,7 +568,6 @@ namespace C4pt0r::Features
             }
         }
 
-        // ---------------- vehicle fun ----------------
         int veh = Natives::IsPedInAnyVehicle(ped) ? Natives::GetVehiclePedIsIn(ped) : 0;
         if (g_Fun.repairVeh) {
             g_Fun.repairVeh = false;
@@ -645,9 +595,6 @@ namespace C4pt0r::Features
         }
     }
 
-    // ---- RestoreEntity: devolve o ped ao normal SEM limpar os toggles ----
-    //  Usada pelo watchdog/recovery: se os natives voltarem, as features
-    //  que o usuario ligou re-aplicam sozinhas no proximo tick.
     void RestoreEntity()
     {
         int ped = Natives::PlayerPedId();
@@ -668,8 +615,6 @@ namespace C4pt0r::Features
         } __except (EXCEPTION_EXECUTE_HANDLER) {}
     }
 
-    // ---- RestoreAll: devolve o ped ao estado normal ----------------------
-    //  Chamada no unload e pelo botao "Restaurar tudo" — zera tudo.
     void RestoreAll()
     {
         int ped = Natives::PlayerPedId();
@@ -689,14 +634,14 @@ namespace C4pt0r::Features
             __try { Natives::SetRunSprintMultiplier(player, 1.0f); }
             __except (EXCEPTION_EXECUTE_HANDLER) {}
         }
-        // aborta TP em voo (descongela a entidade que estava no ar)
+
         if (s_TpBusy && s_TpEnt) {
             __try { Natives::FreezeEntityPosition(s_TpEnt, false); }
             __except (EXCEPTION_EXECUTE_HANDLER) {}
             s_TpBusy = false;
             SceneStop();
         }
-        // mundo/diversao de volta ao normal
+
         __try {
             uint64_t zero[] = { 0 };
             uint64_t one[]  = { FA(1.f) };
@@ -712,7 +657,7 @@ namespace C4pt0r::Features
                           CN("SET_POLICE_IGNORE_PLAYER", a, 2);
                           CN("SET_EVERYONE_IGNORE_PLAYER", a, 2); }
         } __except (EXCEPTION_EXECUTE_HANDLER) {}
-        // limpa flags que mantinham estado
+
         g_Player.godmode = g_Player.invisible = g_Player.noRecoil = false;
         g_Player.infiniteAmmo = g_Player.speedHack = g_Player.noclip = false;
         g_Farm.running = false;
@@ -724,7 +669,6 @@ namespace C4pt0r::Features
         Log::Write("RestoreAll: estado do ped restaurado.");
     }
 
-    // ---- Mecanico (tunagem em qualquer lugar) ------------------------------
     static int MechTargetVeh(int ped)
     {
         int veh = 0;
@@ -739,9 +683,6 @@ namespace C4pt0r::Features
         return veh;
     }
 
-    //  Mexer em veiculo REMOTO (de outro player) crashava o cliente —
-    //  so aplica quando a gente tem controle da entidade. Se nao tem,
-    //  pede e tenta de novo no proximo tick.
     static int s_MechCtrlTries = 0;
     static bool MechHasControl(int veh)
     {
@@ -789,8 +730,8 @@ namespace C4pt0r::Features
     static void MechApplyMods(int veh)
     {
         uint64_t kit[2] = { (uint64_t)veh, 0 };
-        CN("SET_VEHICLE_MOD_KIT", kit, 2);          // obrigatorio antes de mods
-        if (g_Mech.wheelType >= 0) {                // wheel type vem antes das rodas
+        CN("SET_VEHICLE_MOD_KIT", kit, 2);
+        if (g_Mech.wheelType >= 0) {
             uint64_t a[2] = { (uint64_t)veh, (uint64_t)g_Mech.wheelType };
             CN("SET_VEHICLE_WHEEL_TYPE", a, 2);
         }
@@ -807,7 +748,7 @@ namespace C4pt0r::Features
             uint64_t a[4] = { (uint64_t)veh, 48, (uint64_t)g_Mech.livery, 0 };
             CN("SET_VEHICLE_MOD", a, 4);
             uint64_t b[3] = { (uint64_t)veh, (uint64_t)g_Mech.livery, 0 };
-            CN("SET_VEHICLE_LIVERY", b, 3);         // builds antigos
+            CN("SET_VEHICLE_LIVERY", b, 3);
         }
         { uint64_t a[3] = { (uint64_t)veh, 18, g_Mech.turbo ? 1ull : 0ull };
           CN("TOGGLE_VEHICLE_MOD", a, 3); }
@@ -869,12 +810,11 @@ namespace C4pt0r::Features
         if (!any) return;
         int ped = Natives::PlayerPedId();
         int veh = ped ? MechTargetVeh(ped) : 0;
-        // dentro do veiculo = nosso — aplica direto, sem precisar provar
-        // controle (os natives de controle falham ou mentem em alguns builds)
+
         bool inside = veh && Natives::IsPedInAnyVehicle(ped) &&
                       Natives::GetVehiclePedIsIn(ped) == veh;
         if (veh && !inside && !MechHasControl(veh)) {
-            if (++s_MechCtrlTries < 60) {   // ~2s pedindo controle
+            if (++s_MechCtrlTries < 60) {
                 snprintf(g_Mech.status, sizeof(g_Mech.status),
                          "pedindo controle do veiculo... (%d/60)", s_MechCtrlTries);
                 return;
@@ -916,7 +856,6 @@ namespace C4pt0r::Features
         g_Mech.applyPower = g_Mech.plate = g_Mech.saveGarage = false;
     }
 
-    // ---- Armas -------------------------------------------------------------
     static const char* kWeaponList[] = {
         "weapon_pistol","weapon_combatpistol","weapon_appistol","weapon_pistol50",
         "weapon_snspistol","weapon_heavypistol","weapon_vintagepistol",
@@ -997,14 +936,6 @@ namespace C4pt0r::Features
         g_Weapon.stripAll = g_Weapon.refillAll = false;
     }
 
-    // ---- Player data collection (throttled — feeds ESP + player list) ----
-    //  Always runs so the player list works even with ESP off. WorldToScreen
-    //  is only paid for when ESP is actually enabled.
-    //
-    //  CRITICO: natives NUNCA rodam segurando g_DataMutex — se uma chamada
-    //  trava no meio, o mutex ficava preso pra sempre e TODA thread nova
-    //  morria no lock_guard (o ciclo infinito de respawns do log). Coleta
-    //  em arrays locais; o lock so serve pra copiar o resultado.
     static void TickPlayerData()
     {
         static auto last = std::chrono::steady_clock::time_point{};
@@ -1019,7 +950,6 @@ namespace C4pt0r::Features
         Vec3 localPos = Natives::GetEntityCoords(localPed);
         bool espOn   = g_ESP.enabled;
 
-        // coleta local (sem lock)
         static PlayerESPData   tmpData[MAX_PLAYERS];
         static PlayerListEntry tmpList[MAX_PLAYERS];
         int count = 0;
@@ -1041,7 +971,7 @@ namespace C4pt0r::Features
             char nameBuf[64] = {};
             bool gotName = false;
             if (name && Memory::IsReadable(reinterpret_cast<uintptr_t>(name))) {
-                // a string pode cruzar pra uma pagina guard no meio do copy
+
                 __try {
                     strncpy_s(nameBuf, name, sizeof(nameBuf) - 1);
                     gotName = true;
@@ -1055,8 +985,6 @@ namespace C4pt0r::Features
             int armor = dead ? 0 : Natives::GetPedArmour(ped);
             bool inVeh = Natives::IsPedInAnyVehicle(ped);
 
-            // godmode detection — provavel admin/dono do server (so quando
-            // ESP ligado pra nao gastar natives)
             bool god = false;
             if (espOn) {
                 uint64_t ga[] = { static_cast<uint64_t>(i) };
@@ -1064,7 +992,6 @@ namespace C4pt0r::Features
                 if (CN("GET_PLAYER_INVINCIBLE", ga, 1, gr)) god = gr[0] != 0;
             }
 
-            // player list row (always collected)
             if (count < MAX_PLAYERS) {
                 auto& e = tmpList[count++];
                 e.id = i; e.ped = ped; e.distance = dist;
@@ -1073,9 +1000,8 @@ namespace C4pt0r::Features
                 strncpy_s(e.name, nameBuf, sizeof(e.name) - 1);
             }
 
-            // ESP data — only within range when ESP enabled
             if (!espOn || dead || dist > g_ESP.maxDistance) continue;
-            // filtro admin(god)/normal
+
             if (g_ESP.filter == 1 && god)  continue;
             if (g_ESP.filter == 2 && !god) continue;
 
@@ -1099,8 +1025,6 @@ namespace C4pt0r::Features
             strncpy_s(data.name, nameBuf, sizeof(data.name) - 1);
         }
 
-        // publica o resultado — lock curto; se um zumbi segurar o mutex,
-        // try_lock_for sai em 50ms em vez de matar a thread
         if (g_DataMutex.try_lock_for(std::chrono::milliseconds(50))) {
             memcpy(g_PlayersData, tmpData, sizeof(tmpData));
             memcpy(g_PlayerList,  tmpList, sizeof(tmpList));
@@ -1109,11 +1033,10 @@ namespace C4pt0r::Features
         }
     }
 
-    // ---- Aimbot ---------------------------------------------------------
     static void TickAimbot()
     {
         if (!g_Aimbot.enabled) return;
-        // Only active while right mouse button is held
+
         if (!(GetAsyncKeyState(VK_RBUTTON) & 0x8000)) return;
 
         int localPed    = Natives::PlayerPedId();
@@ -1126,7 +1049,6 @@ namespace C4pt0r::Features
         float camYaw   = camRot.z;
         float camPitch = camRot.x;
 
-        // Select bone
         int boneId = Natives::Bone::HEAD;
         switch (g_Aimbot.targetBone) {
             case 0: boneId = Natives::Bone::HEAD;  break;
@@ -1145,7 +1067,6 @@ namespace C4pt0r::Features
             int ped = Natives::GetPlayerPed(i);
             if (!ped || Natives::IsEntityDead(ped)) continue;
 
-            // Visibility check
             if (g_Aimbot.visibleOnly) {
                 if (!Natives::HasClearLOS(localPed, ped, 17))
                     continue;
@@ -1156,7 +1077,6 @@ namespace C4pt0r::Features
             float dist   = delta.Length();
             if (dist < 1.0f) continue;
 
-            // Calculate angle to target
             float targetYaw   = atan2f(-delta.x, delta.y) * RAD2DEG;
             float groundDist  = sqrtf(delta.x * delta.x + delta.y * delta.y);
             float targetPitch = atan2f(delta.z, groundDist) * RAD2DEG;
@@ -1164,7 +1084,6 @@ namespace C4pt0r::Features
             float dYaw   = targetYaw - camYaw;
             float dPitch = targetPitch - camPitch;
 
-            // Normalize yaw delta to [-180, 180]
             while (dYaw > 180.0f)  dYaw -= 360.0f;
             while (dYaw < -180.0f) dYaw += 360.0f;
 
@@ -1192,7 +1111,6 @@ namespace C4pt0r::Features
             while (dYaw > 180.0f)  dYaw -= 360.0f;
             while (dYaw < -180.0f) dYaw += 360.0f;
 
-            // Smooth
             float smooth = (g_Aimbot.smooth > 1.0f) ? g_Aimbot.smooth : 1.0f;
             float newHeading = currentHeading + (dYaw / smooth);
             float newPitch   = currentPitch   + (dPitch / smooth);
@@ -1202,7 +1120,6 @@ namespace C4pt0r::Features
         }
     }
 
-    // ---- Live inspector (writes g_Inspector for the Tools tab) ----------
     static void TickInspector()
     {
         if (!g_Farm.inspEnabled) return;
@@ -1227,7 +1144,6 @@ namespace C4pt0r::Features
         const char* nm = Natives::GetPlayerName(player);
         if (nm) strncpy_s(g_Inspector.name, nm, sizeof(g_Inspector.name) - 1);
 
-        // Controls worth capturing for RP-job actions (E, pickup, F, G, R, M)
         static const int watch[] = { 51, 38, 75, 47, 45, 244, 23, 58 };
         int out = 0;
         for (int c : watch) {
@@ -1237,10 +1153,6 @@ namespace C4pt0r::Features
         while (out < 8) g_Inspector.pressed[out++] = 0;
     }
 
-    // ---- Farm macro (coleta -> vende -> repete) --------------------------
-    //  Timeline per cycle:
-    //    TP A -> settle -> press key x holdFrames -> interval ->
-    //    TP B -> settle -> press key x holdFrames -> interval -> next cycle
     enum class FarmStage { Idle, ToA, ActA, WaitA, ToB, ActB, WaitB };
     static FarmStage s_Stage = FarmStage::Idle;
     static std::chrono::steady_clock::time_point s_StageSince;
@@ -1327,19 +1239,8 @@ namespace C4pt0r::Features
         }
     }
 
-    // TriggerServerEvent removido: natives CFX (TRIGGER_SERVER_EVENT_INTERNAL,
-    // GET_PLAYER_SERVER_ID...) NAO estao na tabela de natives do GTA5 — o
-    // lookup joaat32 cai em bucket colidido e retorna um handler errado que
-    // passa no IsExecutable -> executa funcao aleatoria -> crash +0x1750.
-    // Nao existe caminho seguro pra server event por esse invoke.
-
-    // ---- Acoes em outros jogadores: dar god / agarrar --------------------
-    //  O ped de outro player pertence ao cliente dele — se o server nao
-    //  ceder controle, o efeito fica so local (voce ve, o server nao). A
-    //  gente pede controle por ~40 ticks; sem resposta, aplica assim mesmo
-    //  e avisa no log.
-    static int  s_GrabPed      = 0;    // alvo esperando controle
-    static int  s_GrabAttached = 0;    // alvo ja carregado no ombro
+    static int  s_GrabPed      = 0;
+    static int  s_GrabAttached = 0;
     static int  s_GrabTries    = 0;
 
     static void GrabDetach()
@@ -1352,15 +1253,11 @@ namespace C4pt0r::Features
         g_PActions.grabActive = false;
     }
 
-    // (os eventos de carry de server foram removidos — natives CFX nao
-    // sao alcancaveis pela nossa invocacao de native do GTA5)
-
     static void TickPlayerActions()
     {
         int ped = Natives::PlayerPedId();
         if (!ped) { if (s_GrabPed || s_GrabAttached) GrabDetach(); return; }
 
-        // ---- dar god ----
         if (g_PActions.giveGodId >= 0) {
             int target = g_PActions.giveGodId;
             g_PActions.giveGodId = -1;
@@ -1368,9 +1265,7 @@ namespace C4pt0r::Features
             if (!tped) {
                 Log::Write("God: id %d sem ped (offline?).", target);
             } else {
-                // SEM controle nao toca no ped remoto — mutar estado de
-                // ped de outro player sem ownership corrompe o sync e
-                // crasha o jogo ~segundos depois (crash nos dumps).
+
                 Log::Step("God id=%d check controle", target);
                 if (!MechHasControl(tped)) {
                     Log::Step("God id=%d sem controle — abort", target);
@@ -1389,9 +1284,6 @@ namespace C4pt0r::Features
             }
         }
 
-        // ---- ressuscitar: animacao de RCP + RESURRECT_PED se o server
-        //      ceder controle do ped caido (sem controle, nao toca — mutar
-        //      ped remoto sem ownership corrompe o sync e crasha) ----------
         if (g_PActions.reviveId >= 0) {
             int target = g_PActions.reviveId;
             g_PActions.reviveId = -1;
@@ -1401,7 +1293,7 @@ namespace C4pt0r::Features
             if (!tped) {
                 Log::Write("Revive: id %d sem ped (offline?).", target);
             } else {
-                // CPR cosmetica no nosso ped (igual o medico faz)
+
                 uint64_t rd[2] = { (uint64_t)"mini@cpr@char_a@cpr_str", 0 };
                 CN("REQUEST_ANIM_DICT", rd, 2);
                 uint64_t ta[10] = {
@@ -1430,16 +1322,14 @@ namespace C4pt0r::Features
             }
         }
 
-        // ---- soltar ----
         if (g_PActions.releaseGrab) {
             g_PActions.releaseGrab = false;
             GrabDetach();
             uint64_t ct[1] = { (uint64_t)ped };
-            CN("CLEAR_PED_SECONDARY_TASK", ct, 1);   // para nossa anim de carry
+            CN("CLEAR_PED_SECONDARY_TASK", ct, 1);
             Log::Write("Grab: soltou.");
         }
 
-        // ---- comecar a carregar ----
         if (g_PActions.grabId >= 0) {
             int target = g_PActions.grabId;
             g_PActions.grabId = -1;
@@ -1449,13 +1339,12 @@ namespace C4pt0r::Features
                 Log::Write("Grab: id %d sem ped (offline?).", target);
             } else {
                 uint64_t ad[2] = { (uint64_t)"missfinale_c2mcs_1", 0 };
-                CN("REQUEST_ANIM_DICT", ad, 1);      // nossa anim de carry
+                CN("REQUEST_ANIM_DICT", ad, 1);
                 s_GrabPed = tped;
                 s_GrabTries = 0;
             }
         }
 
-        // ---- esperando controle -> attach no ombro ----
         if (s_GrabPed) {
             uint64_t e[1] = { (uint64_t)s_GrabPed };
             uint64_t er[4] = {};
@@ -1465,19 +1354,18 @@ namespace C4pt0r::Features
             } else {
                 bool ctrl = MechHasControl(s_GrabPed);
                 if (!ctrl && ++s_GrabTries > 40) {
-                    // attach local em ped remoto SEM controle = crash
-                    // assincrono do jogo (confirmado no dump). Nao faz.
+
                     s_GrabPed = 0;
                     Log::Write("Grab: server nao deu controle — cancelado.");
                 } else if (ctrl) {
                     int bone = 0;
-                    uint64_t ba[2] = { (uint64_t)ped, 40269 };   // SKEL_Spine3
+                    uint64_t ba[2] = { (uint64_t)ped, 40269 };
                     uint64_t br[4] = {};
                     if (CN("GET_PED_BONE_INDEX", ba, 2, br)) bone = (int)br[0];
                     uint64_t at[15] = {
                         (uint64_t)s_GrabPed, (uint64_t)ped, (uint64_t)bone,
-                        FA(0.27f), FA(0.15f), FA(0.63f),   // posicao no ombro
-                        FA(0.5f),  FA(0.5f),  FA(0.0f),    // rotacao deitado
+                        FA(0.27f), FA(0.15f), FA(0.63f),
+                        FA(0.5f),  FA(0.5f),  FA(0.0f),
                         0, 0, 0, 1, 2, 0
                     };
                     if (CN("ATTACH_ENTITY_TO_ENTITY", at, 15)) {
@@ -1497,7 +1385,6 @@ namespace C4pt0r::Features
             }
         }
 
-        // ---- alvo carregado sumiu? limpa estado ----
         if (s_GrabAttached) {
             uint64_t e[1] = { (uint64_t)s_GrabAttached };
             uint64_t er[4] = {};
@@ -1508,13 +1395,9 @@ namespace C4pt0r::Features
         }
     }
 
-    // ---- Executor de Lua ------------------------------------------------
-    //  Dispara TriggerServerEvent de verdade via lua_State capturado do ScRT.
-    //  Os presets atiram a bateria de eventos achados na varredura — o server
-    //  responde pro que existir e ignora o resto.
     static void TickLua()
     {
-        LuaExec::Init();   // lazy — tenta capturar um lua_State
+        LuaExec::Init();
 
         if (g_Lua.preset) {
             int p = g_Lua.preset;
@@ -1523,14 +1406,14 @@ namespace C4pt0r::Features
 
             char buf[4096];
             if (p == 4) {
-                // reviver a si mesmo (client+server events)
+
                 snprintf(buf, sizeof(buf),
                     "TriggerEvent('esx_ambulancejob:revive')\n"
                     "TriggerServerEvent('hospital:server:RevivePlayer',"
                     "GetPlayerServerId(PlayerId()))\n");
             } else if (t >= 0) {
                 const char* body = "";
-                if (p == 1) {      // ressuscitar alvo — bateria de eventos
+                if (p == 1) {
                     body =
                         "TriggerServerEvent('hospital:server:RevivePlayer',s)\n"
                         "TriggerServerEvent('esx_ambulancejob:revive',s)\n"
@@ -1540,16 +1423,26 @@ namespace C4pt0r::Features
                         "TriggerServerEvent('paramedico:reanimar',s)\n"
                         "TriggerServerEvent('hospital:reanimar',s)\n"
                         "TriggerServerEvent('vrp:reanimar',s)\n";
-                } else if (p == 2) {   // carregar alvo
+                } else if (p == 2) {
                     body =
                         "TriggerServerEvent('CarryPeople:sync',s)\n"
                         "TriggerServerEvent('esx_ambulancejob:drag',s)\n"
                         "TriggerServerEvent('police:drag',s)\n";
-                } else if (p == 3) {   // god no alvo
+                } else if (p == 3) {
                     body =
                         "TriggerServerEvent('admin:god',s)\n"
                         "TriggerServerEvent('vrp:god',s)\n"
                         "TriggerServerEvent('god:player',s)\n";
+                } else if (p == 5) {
+                    body =
+                        "TriggerServerEvent('CarryPeople:sync',s)\n"
+                        "TriggerServerEvent('police:drag',s)\n"
+                        "TriggerServerEvent('esx_ambulancejob:drag',s)\n"
+                        "TriggerServerEvent('esx_policejob:drag',s)\n"
+                        "TriggerServerEvent('admin:bringPlayer',s)\n"
+                        "TriggerServerEvent('admin:bring',s)\n"
+                        "TriggerServerEvent('bring:player',s)\n"
+                        "TriggerServerEvent('vRP:teleport',s)\n";
                 }
                 snprintf(buf, sizeof(buf),
                     "local s=GetPlayerServerId(%d)\n%s", t, body);
@@ -1566,7 +1459,6 @@ namespace C4pt0r::Features
         }
     }
 
-    // ---- Main tick (called from cheat thread) ---------------------------
     void Tick()
     {
         if (!Natives::IsReady()) return;
@@ -1581,8 +1473,6 @@ namespace C4pt0r::Features
                        ped, pid, pos.x, pos.y, pos.z);
         }
 
-        // g_TickStage marca o sub-tick em execucao — se a thread travar, o
-        // supervisor loga exatamente onde (stage no HealthString/log)
         Natives::g_TickStage = 1;  TickGodmode();
         Natives::g_TickStage = 2;  TickInvisible();
         Natives::g_TickStage = 3;  TickSpeed();
@@ -1603,17 +1493,6 @@ namespace C4pt0r::Features
         Natives::g_TickStage = 0;
     }
 
-    // ====================================================================
-    //  FrameTick — o driver do cheat, chamado pelo hook do Present.
-    //
-    //  O FiveM/adhesive SUSPENDE threads estrangeiras — a feature thread
-    //  congelava no meio de um sleep (stage 94 com beat velho) e nada
-    //  revivia, porque nem o supervisor podia rodar. A thread de render
-    //  do jogo NUNCA e suspensa (senao o jogo congela junto) — entao o
-    //  tick roda nela. A feature thread continua existindo como backup:
-    //  se o Present parar, ela assume (o gate atomico garante um driver
-    //  so). Contem o watchdog de natives + recovery tambem.
-    // ====================================================================
     void FrameTick()
     {
         static std::atomic<int64_t> s_LastTick{0};
@@ -1627,9 +1506,9 @@ namespace C4pt0r::Features
         int64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now().time_since_epoch()).count();
         int64_t prev = s_LastTick.load();
-        if (now - prev < 30) return;   // ~33Hz — cheat nao precisa 80fps
+        if (now - prev < 30) return;
         if (!s_LastTick.compare_exchange_strong(prev, now)) return;
-        if (s_InTick.exchange(true)) return;      // outro driver no tick
+        if (s_InTick.exchange(true)) return;
 
         Natives::g_TickStage = 91;
         Natives::g_TickBeat  = now;
@@ -1656,8 +1535,6 @@ namespace C4pt0r::Features
                 }
             }
 
-            // watchdog: natives morrem SEM excecao tambem — pinga ~2s;
-            // 2 falhas = re-init (o proprio driver resolve agora)
             Natives::g_TickStage = 93;
             if (++watchTicks >= 120) {
                 watchTicks = 0;
@@ -1681,7 +1558,7 @@ namespace C4pt0r::Features
             }
         } else {
             Natives::g_TickStage = 95;
-            if (++recoveryWait >= 300) {   // ~5s
+            if (++recoveryWait >= 300) {
                 recoveryWait = 0;
                 Log::Write("Tentando re-inicializar natives...");
                 Natives::g_TickStage = 96;
@@ -1701,9 +1578,6 @@ namespace C4pt0r::Features
         s_InTick = false;
     }
 
-    // ====================================================================
-    //  RenderOverlay — called from Present hook, draws ESP with ImGui
-    // ====================================================================
     void RenderOverlay()
     {
         if (!g_ESP.enabled) return;
@@ -1723,8 +1597,6 @@ namespace C4pt0r::Features
         ImU32 hpYellow = IM_COL32(255, 200, 0, 255);
         ImU32 snapCol  = IM_COL32(0, 212, 255, 100);
 
-        // try_lock: se o mutex estiver preso por um zumbi, pulamos esse
-        // frame em vez de travar a thread de render pra sempre
         if (!g_DataMutex.try_lock_for(std::chrono::milliseconds(10))) return;
 
         ImU32 godCol = ImGui::ColorConvertFloat4ToU32(
@@ -1734,15 +1606,12 @@ namespace C4pt0r::Features
             const auto& p = g_PlayersData[i];
             if (!p.active || !p.onScreen) continue;
 
-            // admins/godmode ganham caixa dourada
             const ImU32 curBox = p.god ? godCol : boxCol;
 
-            // Screen coords are 0..1, convert to pixels
             float sx = p.screenPos.x * sw;
             float sy = p.screenPos.y * sh;
 
-            // Approximate box size based on distance
-            float boxH = (sh / p.distance) * 1.8f;  // ~1.8m player height
+            float boxH = (sh / p.distance) * 1.8f;
             boxH = std::clamp(boxH, 20.0f, sh * 0.8f);
             float boxW = boxH * 0.4f;
 
@@ -1751,9 +1620,8 @@ namespace C4pt0r::Features
             float top    = sy - boxH * 0.7f;
             float bottom = sy + boxH * 0.3f;
 
-            // ---- Box ----
             if (g_ESP.boxes) {
-                // Corner box style (looks cleaner than full rectangle)
+
                 float cornerLen = boxW * 0.25f;
                 auto drawCorner = [&](float cx, float cy, float dx, float dy) {
                     drawList->AddLine(ImVec2(cx, cy), ImVec2(cx + dx * cornerLen, cy), curBox, 2.0f);
@@ -1765,7 +1633,6 @@ namespace C4pt0r::Features
                 drawCorner(right, bottom, -1, -1);
             }
 
-            // ---- Name ([id] nome, [GOD] se admin) ----
             if (g_ESP.names) {
                 char nameBuf[80];
                 snprintf(nameBuf, sizeof(nameBuf), "[%d] %s%s",
@@ -1776,7 +1643,6 @@ namespace C4pt0r::Features
                     nameCol, nameBuf);
             }
 
-            // ---- Stats (hp + colete + veiculo) ----
             if (g_ESP.names) {
                 char statBuf[48];
                 if (p.inVehicle)
@@ -1791,7 +1657,6 @@ namespace C4pt0r::Features
                     IM_COL32(200, 210, 220, 220), statBuf);
             }
 
-            // ---- Distance ----
             if (g_ESP.distance) {
                 char distBuf[32];
                 snprintf(distBuf, sizeof(distBuf), "%.0fm", p.distance);
@@ -1801,7 +1666,6 @@ namespace C4pt0r::Features
                     IM_COL32(180, 180, 180, 200), distBuf);
             }
 
-            // ---- Health bar ----
             if (g_ESP.healthBars && p.maxHealth > 0) {
                 float hpFrac = static_cast<float>(p.health) / static_cast<float>(p.maxHealth);
                 hpFrac = std::clamp(hpFrac, 0.0f, 1.0f);
@@ -1810,13 +1674,11 @@ namespace C4pt0r::Features
                 float barL = left - barW - 3;
                 float barH = bottom - top;
 
-                // Background
                 drawList->AddRectFilled(
                     ImVec2(barL - 1, top - 1),
                     ImVec2(barL + barW + 1, bottom + 1),
                     IM_COL32(0, 0, 0, 160));
 
-                // Health (bottom-up fill)
                 ImU32 hpColor = hpFrac > 0.5f ? hpGreen : (hpFrac > 0.25f ? hpYellow : hpRed);
                 float fillTop = bottom - barH * hpFrac;
                 drawList->AddRectFilled(
@@ -1825,10 +1687,9 @@ namespace C4pt0r::Features
                     hpColor);
             }
 
-            // ---- Snaplines ----
             if (g_ESP.snaplines) {
                 drawList->AddLine(
-                    ImVec2(sw * 0.5f, sh),   // bottom center of screen
+                    ImVec2(sw * 0.5f, sh),
                     ImVec2(sx, bottom),
                     snapCol, 1.0f);
             }

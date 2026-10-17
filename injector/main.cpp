@@ -1,8 +1,5 @@
-// ============================================================================
-//  C4pt0r Loader v3 — ImGui/D3D11 UI
-//  Login/Cadastro -> catalogo de produtos -> licenca -> download -> injecao.
-//  PIX dentro do loader (QR textura + copia-e-cola).
-// ============================================================================
+
+
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
@@ -44,13 +41,11 @@ extern IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandler(
 #pragma comment(lib, "ole32.lib")
 #pragma comment(lib, "shlwapi.lib")
 
-// ---- Config ----------------------------------------------------------------
 static const char* SUPA_HOST = "bzthdklqvjtutkeiimpq.supabase.co";
 static const char* ANON_KEY  = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJ6dGhka2xxdmp0dXRrZWlpbXBxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTIxNzU2MDYsImV4cCI6MjEwNzc1MTYwNn0.K1_us_hjL10yynZRDsrWZKwId-l5NuzrDSuHeFXtIdI";
 static const wchar_t* DISCORD_URL = L"https://discord.gg/PhkbhxMBy";
 static const wchar_t* YOUTUBE_URL = L"https://www.youtube.com/channel/UCX5aJEgyvTqUyR4awSAx8ig/";
 
-// ---- D3D11 -----------------------------------------------------------------
 static ID3D11Device*           g_pd3dDevice  = nullptr;
 static ID3D11DeviceContext*    g_pd3dCtx     = nullptr;
 static IDXGISwapChain*         g_pSwapChain  = nullptr;
@@ -80,14 +75,13 @@ static bool CreateDeviceD3D(HWND hWnd) {
         &g_pd3dDevice, nullptr, &g_pd3dCtx));
 }
 
-// ---- App state -------------------------------------------------------------
 enum Screen { SCR_LOGIN, SCR_SIGNUP, SCR_MAIN, SCR_PAY };
 enum StatKind { ST_NEUTRO, ST_OK, ST_ERR, ST_GOLD };
 
 struct Variant {
     std::string id, label, bonus;
     int price_cents = 0, discount_cents = 0;
-    int duration_minutes = -1;   // -1 = vitalicio
+    int duration_minutes = -1;
     int finalPrice() const {
         int f = price_cents - discount_cents;
         return f < 1 ? 1 : f;
@@ -104,14 +98,14 @@ struct Variant {
 
 struct Product {
     std::string id, slug, name, desc, dllPath;
-    int price_cents = 0, duration_days = 0;   // 0 = vitalicio
+    int price_cents = 0, duration_days = 0;
     std::vector<std::string> features;
     std::vector<Variant> variants;
     bool isExe() const {
         return dllPath.size() > 4 &&
             dllPath.compare(dllPath.size() - 4, 4, ".exe") == 0;
     }
-    // menor preco final entre variantes (0 se nao tem variante)
+
     int minPrice() const {
         if (variants.empty()) return price_cents;
         int m = variants[0].finalPrice();
@@ -121,7 +115,6 @@ struct Product {
 };
 struct LicInfo { bool active = false; std::string expires, variant; };
 
-// licenca completa do usuario (vem do REST — tem id pra resetar hwid)
 struct MyLic {
     std::string id, name, slug, variant, expires, hwid, status;
     bool dll = true;
@@ -137,11 +130,11 @@ static struct {
     bool                 isAdmin = false;
     std::vector<Product> products;
     std::vector<MyLic>   myLicenses;
-    std::map<std::string, LicInfo> licenses;      // slug -> licenca do user
+    std::map<std::string, LicInfo> licenses;
     std::string          planName, validity, hwid;
     std::string          status;
     std::string          orderId, qrEmv, qrB64, paySlug;
-    int                  mainTab = 0;             // 0 = catalogo, 1 = minha conta
+    int                  mainTab = 0;
     std::mutex           mtx;
     std::string          logLine;
 } g;
@@ -159,8 +152,7 @@ static void LogLine(const std::string& s) {
     g.logLine = s;
 }
 
-// ---- Helpers ----------------------------------------------------------------
-static std::wstring ToWide(const std::string& s); // from net.h
+static std::wstring ToWide(const std::string& s);
 static std::string Narrow(const wchar_t* w) {
     int n = WideCharToMultiByte(CP_UTF8, 0, w, -1, nullptr, 0, nullptr, nullptr);
     std::string s(n - 1, 0);
@@ -177,7 +169,6 @@ static std::string JsonEsc(const std::string& s) {
 }
 static std::string ToUtf8(const std::wstring& w) { return Narrow(w.c_str()); }
 
-// ---- Session (DPAPI) ---------------------------------------------------------
 static std::wstring SessPath() {
     wchar_t* app = nullptr;
     SHGetKnownFolderPath(FOLDERID_RoamingAppData, 0, nullptr, &app);
@@ -214,7 +205,6 @@ static std::string LoadRefresh() {
 }
 static void ClearSession() { DeleteFileW(SessPath().c_str()); }
 
-// ---- HWID --------------------------------------------------------------------
 static std::string GetHwid() {
     DWORD serial = 0;
     GetVolumeInformationW(L"C:\\", nullptr, 0, &serial, nullptr, nullptr, nullptr, 0);
@@ -228,7 +218,6 @@ static std::string GetHwid() {
     return buf;
 }
 
-// ---- Supabase -----------------------------------------------------------------
 static std::vector<std::pair<std::string, std::string>> ApiHdrs(const std::string& jwt = "") {
     std::vector<std::pair<std::string, std::string>> h = {
         {"apikey", ANON_KEY},
@@ -261,7 +250,6 @@ static bool DoPasswordGrant(const std::string& email, const std::string& pass, s
     return false;
 }
 
-// 0 = logado | 1 = criou (confirmar email) | -1 = erro
 static int DoSignup(const std::string& email, const std::string& pass, std::string& err) {
     std::string body = "{\"email\":\"" + JsonEsc(email) + "\",\"password\":\"" + JsonEsc(pass) + "\"}";
     auto r = Http(SUPA_HOST, "POST", "/auth/v1/signup", ApiHdrs(), body);
@@ -309,7 +297,7 @@ static void FetchProducts() {
         if (pr.slug.empty()) continue;
         out.push_back(pr);
     }
-    // variantes (planos) agrupadas por produto
+
     auto rv = RestGet("/rest/v1/product_variants?select=id,product_id,label,price_cents,discount_cents,duration_minutes,bonus_label&active=eq.true&order=sort.asc,price_cents.asc");
     auto jv = JsonParse(rv.body);
     if (jv.type == Json::Arr) {
@@ -330,7 +318,6 @@ static void FetchProducts() {
     g.products = out;
 }
 
-// license-check sem slug -> preenche mapa de licencas; com slug+hwid -> download_url
 static bool CheckLicense(const std::string& slug, bool bindHwid, std::string* outUrl, std::string* outErr) {
     std::string body = "{\"action\":\"check\"";
     if (!slug.empty()) body += ",\"product_slug\":\"" + slug + "\"";
@@ -339,7 +326,6 @@ static bool CheckLicense(const std::string& slug, bool bindHwid, std::string* ou
     auto r = FnCall("license-check", body, g.accessToken);
     auto j = JsonParse(r.body);
 
-    // mapa de todas as licencas (sempre presente)
     std::map<std::string, LicInfo> m;
     for (auto& l : j["licenses"].a) {
         LicInfo li;
@@ -362,7 +348,7 @@ static bool CheckLicense(const std::string& slug, bool bindHwid, std::string* ou
         std::string exp = lic["expires_at"].str();
         if (exp.empty()) g.validity = "Vitalicia";
         else {
-            // dias restantes
+
             int y, mo, d;
             if (sscanf_s(exp.c_str(), "%d-%d-%d", &y, &mo, &d) == 3) {
                 SYSTEMTIME st{}; st.wYear = (WORD)y; st.wMonth = (WORD)mo; st.wDay = (WORD)d;
@@ -382,8 +368,6 @@ static bool CheckLicense(const std::string& slug, bool bindHwid, std::string* ou
     return false;
 }
 
-// ---- REST: licencas detalhadas + admin ------------------------------------------
-// segundos ate expirar (<0 = ja venceu, -1 = vitalicia)
 static long long SecondsLeft(const std::string& iso) {
     if (iso.empty()) return -1;
     int y, mo, d, h, mi, s;
@@ -409,7 +393,6 @@ static std::string ExpiryLabel(const std::string& iso, std::string* dateOut) {
     return buf;
 }
 
-// busca licencas via REST (RLS: o user le as proprias) — tem id + hwid
 static void FetchMyLicenses() {
     auto r = RestGet("/rest/v1/licenses?select=id,status,expires_at,hwid,variant_label,products(name,slug,dll_path)&order=created_at.desc",
                      g.accessToken);
@@ -433,7 +416,6 @@ static void FetchMyLicenses() {
     g.myLicenses = out;
 }
 
-// perfil: user id + flag admin
 static void FetchProfile() {
     auto r = Http(SUPA_HOST, "GET", "/auth/v1/user", ApiHdrs(g.accessToken));
     g.userId = JsonParse(r.body)["id"].str();
@@ -444,7 +426,6 @@ static void FetchProfile() {
         g.isAdmin = jp.a[0]["is_admin"].truthy();
 }
 
-// admin: limpa o hwid da licenca (RLS so deixa admin dar update)
 static void ThreadResetHwid(std::string licId) {
     g.busy = true;
     auto h = ApiHdrs(g.accessToken);
@@ -459,7 +440,6 @@ static void ThreadResetHwid(std::string licId) {
     g.busy = false;
 }
 
-// ---- FiveM inject --------------------------------------------------------------
 static DWORD FindFiveMPid() {
     HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (snap == INVALID_HANDLE_VALUE) return 0;
@@ -492,13 +472,12 @@ static bool InjectDLL(DWORD pid, const std::wstring& dllPath) {
     return code != 0;
 }
 
-// ---- QR PIX -> textura D3D (gerado localmente, sem rede) --------------------------
 static bool QrToTexture(const std::string& emv, ID3D11ShaderResourceView** srv, int* ow, int* oh) {
     using qrcodegen::QrCode;
     QrCode qr = QrCode::encodeText(emv.c_str(), QrCode::Ecc::LOW);
     const int border = 4, scale = 8;
     int dim = (qr.getSize() + border * 2) * scale;
-    std::vector<BYTE> px((size_t)dim * dim * 4, 255);   // branco opaco
+    std::vector<BYTE> px((size_t)dim * dim * 4, 255);
     for (int y = 0; y < qr.getSize(); y++)
         for (int x = 0; x < qr.getSize(); x++)
             if (qr.getModule(x, y))
@@ -506,7 +485,7 @@ static bool QrToTexture(const std::string& emv, ID3D11ShaderResourceView** srv, 
                     for (int dx = 0; dx < scale; dx++) {
                         size_t off = ((size_t)((y + border) * scale + dy) * dim
                             + (x + border) * scale + dx) * 4;
-                        px[off] = px[off + 1] = px[off + 2] = 0;   // modulo preto
+                        px[off] = px[off + 1] = px[off + 2] = 0;
                     }
     D3D11_TEXTURE2D_DESC td{};
     td.Width = dim; td.Height = dim; td.MipLevels = 1; td.ArraySize = 1;
@@ -527,11 +506,10 @@ static bool QrToTexture(const std::string& emv, ID3D11ShaderResourceView** srv, 
     return ok;
 }
 
-// ---- Worker threads ---------------------------------------------------------------
 static void AfterAuth() {
-    CheckLicense("", false, nullptr, nullptr);   // mapa slug -> licenca
-    FetchMyLicenses();                           // cards detalhados (id/hwid/expira)
-    FetchProfile();                              // userId + isAdmin
+    CheckLicense("", false, nullptr, nullptr);
+    FetchMyLicenses();
+    FetchProfile();
     g.screen = SCR_MAIN;
     SetStatus("", ST_NEUTRO);
 }
@@ -589,7 +567,7 @@ static void ThreadBuyPix(std::string slug, std::string variantId) {
         g.qrEmv = j["qr_code"].str();
         g.paySlug = slug;
         g.paid = false;
-        // QR gerado localmente do codigo PIX — instantaneo, sem depender de rede
+
         {
             ID3D11ShaderResourceView* srv = nullptr; int w = 0, hgt = 0;
             if (QrToTexture(g.qrEmv, &srv, &w, &hgt)) {
@@ -599,7 +577,7 @@ static void ThreadBuyPix(std::string slug, std::string variantId) {
         }
         g.screen = SCR_PAY;
         SetStatus("Escaneie o QR ou copie o codigo", ST_GOLD);
-        // poll
+
         std::thread([] {
             for (int i = 0; i < 150 && g.screen == SCR_PAY && !g.paid; i++) {
                 std::string b = "{\"order_id\":\"" + g.orderId + "\"}";
@@ -665,7 +643,6 @@ static void ThreadInject(std::string slug) {
     g.busy = false;
 }
 
-// produto tipo EXE (spoofer etc): baixa via licenca e executa
 static void ThreadRunExe(std::string slug, std::string fname) {
     g.busy = true;
     SetStatus("Verificando licenca...", ST_NEUTRO);
@@ -703,9 +680,6 @@ static void ThreadRunExe(std::string slug, std::string fname) {
     g.busy = false;
 }
 
-// ============================================================================
-//  ImGui style + widgets
-// ============================================================================
 static ImVec4 COL_ACCENT  = ImVec4(0.00f, 0.83f, 1.00f, 1.00f);
 static ImVec4 COL_ACCENT2 = ImVec4(0.00f, 0.55f, 0.75f, 1.00f);
 static ImVec4 COL_CARD    = ImVec4(0.075f, 0.085f, 0.16f, 1.00f);
@@ -764,7 +738,6 @@ static void SetupStyle() {
     s.FrameBorderSize  = 1.0f;
 }
 
-// botao primario grande (gradiente fake via cor + borda accent)
 static bool PrimaryBtn(const char* label, float w = -1, float h = 44) {
     ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.00f, 0.62f, 0.80f, 0.95f));
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.00f, 0.78f, 0.98f, 1.00f));
@@ -774,7 +747,7 @@ static bool PrimaryBtn(const char* label, float w = -1, float h = 44) {
     ImGui::PopStyleColor(4);
     return c;
 }
-// botao secundario discreto
+
 static bool GhostBtn(const char* label, float w = -1, float h = 34) {
     ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.11f, 0.12f, 0.21f, 0.90f));
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.16f, 0.18f, 0.30f, 0.95f));
@@ -795,8 +768,7 @@ static void StatusArea() {
     }
 }
 
-// ---- Particulas (plexus cyan de fundo — vibe GTA hacker) ----------------------
-struct Particle { float x, y, vx, vy; };   // coords normalizadas 0..1
+struct Particle { float x, y, vx, vy; };
 static std::vector<Particle> g_Parts;
 static void InitParticles() {
     g_Parts.resize(65);
@@ -834,9 +806,6 @@ static void DrawParticles(ImDrawList* dl, ImVec2 o, ImVec2 size) {
     }
 }
 
-// ============================================================================
-//  Screens
-// ============================================================================
 static void DrawHeader(const char* subtitle) {
     ImGui::PushFont(F_Title);
     ImGui::TextColored(COL_ACCENT, "C4PT0R");
@@ -844,7 +813,7 @@ static void DrawHeader(const char* subtitle) {
     ImGui::PushFont(F_Sm);
     ImGui::TextColored(COL_DIM, "%s", subtitle);
     ImGui::PopFont();
-    // accent underline
+
     ImDrawList* dl = ImGui::GetWindowDrawList();
     ImVec2 p = ImGui::GetCursorScreenPos();
     dl->AddRectFilled(ImVec2(p.x, p.y), ImVec2(p.x + 90, p.y + 2),
@@ -893,7 +862,7 @@ static void ScreenLogin() {
         SetStatus("", ST_NEUTRO);
     }
     ImGui::EndChild();
-    ImGui::EndChild();   // ##loginwrap
+    ImGui::EndChild();
 
     ImGui::Dummy(ImVec2(0, 10));
     StatusArea();
@@ -958,7 +927,7 @@ static void ScreenSignup() {
         SetStatus("", ST_NEUTRO);
     }
     ImGui::EndChild();
-    ImGui::EndChild();   // ##signupwrap
+    ImGui::EndChild();
 
     ImGui::Dummy(ImVec2(0, 10));
     StatusArea();
@@ -971,13 +940,11 @@ static std::string Brl(int cents) {
     return b;
 }
 
-// card de produto no catalogo
 static void ProductCard(const Product& p, const LicInfo& lic) {
     ImGui::PushID(p.slug.c_str());
     ImGui::PushStyleColor(ImGuiCol_ChildBg, COL_CARD2);
     ImGui::BeginChild("##pcard", ImVec2(0, 0), ImGuiChildFlags_Border | ImGuiChildFlags_AutoResizeY);
 
-    // header: nome + preco
     ImGui::PushFont(F_Med);
     ImGui::TextColored(COL_TEXT, "%s", p.name.c_str());
     ImGui::PopFont();
@@ -993,7 +960,6 @@ static void ProductCard(const Product& p, const LicInfo& lic) {
     if (!p.desc.empty()) ImGui::TextColored(COL_DIM, "%s", p.desc.c_str());
     ImGui::PopFont();
 
-    // pill de status
     if (lic.active) {
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.10f, 0.55f, 0.30f, 0.90f));
         ImGui::SmallButton(" LICENCIA ATIVA ");
@@ -1018,7 +984,7 @@ static void ProductCard(const Product& p, const LicInfo& lic) {
             }
         }
     } else {
-        // seletor de plano (variante)
+
         static std::map<std::string, int> sel;
         int& cur = sel[p.slug];
         if (cur >= (int)p.variants.size()) cur = 0;
@@ -1028,7 +994,6 @@ static void ProductCard(const Product& p, const LicInfo& lic) {
             ImGui::TextColored(COL_DIM, "ESCOLHA O PLANO");
             ImGui::PopFont();
 
-            // combo com preco final + desconto + brinde
             const Variant& cur_v = p.variants[cur];
             std::string curLbl = cur_v.label + "  —  " + Brl(cur_v.finalPrice());
             if (cur_v.discount_cents > 0)
@@ -1067,7 +1032,6 @@ static void ProductCard(const Product& p, const LicInfo& lic) {
     ImGui::Dummy(ImVec2(0, 4));
 }
 
-// botao de aba da sidebar — preenchido quando ativo
 static bool NavTab(const char* label, int idx) {
     bool act = g.mainTab == idx;
     if (act) {
@@ -1091,7 +1055,6 @@ static void Pill(const char* txt, ImVec4 col) {
     ImGui::PopStyleColor();
 }
 
-// card de licenca do usuario (aba MINHA CONTA)
 static void LicenseCard(const MyLic& lic) {
     ImGui::PushID(lic.id.c_str());
     ImGui::PushStyleColor(ImGuiCol_ChildBg, COL_CARD2);
@@ -1099,7 +1062,7 @@ static void LicenseCard(const MyLic& lic) {
 
     bool active = lic.status == "active";
     long long secs = SecondsLeft(lic.expires);
-    bool expiring = active && secs > 0 && secs < 48 * 3600;   // menos de 48h
+    bool expiring = active && secs > 0 && secs < 48 * 3600;
 
     ImGui::PushFont(F_Med);
     ImGui::TextColored(COL_TEXT, "%s", lic.name.empty() ? lic.slug.c_str() : lic.name.c_str());
@@ -1146,7 +1109,7 @@ static void LicenseCard(const MyLic& lic) {
             }
         }
     }
-    // admin: resetar hwid dessa licenca
+
     if (g.isAdmin && !lic.hwid.empty()) {
         if (GhostBtn("RESETAR HWID", -1, 28)) {
             if (!g.busy) std::thread(ThreadResetHwid, lic.id).detach();
@@ -1171,7 +1134,7 @@ static void TabCatalogo() {
 }
 
 static void TabConta() {
-    // info da conta
+
     ImGui::BeginChild("##acct", ImVec2(0, 92), ImGuiChildFlags_Border);
     ImGui::PushFont(F_Sm); ImGui::TextColored(COL_DIM, "CONECTADO COMO"); ImGui::PopFont();
     ImGui::PushFont(F_Med);
@@ -1202,7 +1165,7 @@ static void TabConta() {
 }
 
 static void ScreenMain() {
-    // ---- sidebar ----
+
     ImGui::BeginChild("##sidebar", ImVec2(190, -44), ImGuiChildFlags_Border);
     ImGui::PushFont(F_Title);
     ImGui::TextColored(COL_ACCENT, "C4PT0R");
@@ -1217,7 +1180,6 @@ static void ScreenMain() {
     ImGui::Dummy(ImVec2(0, 4));
     NavTab("  MINHA CONTA", 1);
 
-    // rodape da sidebar
     float remain = ImGui::GetContentRegionAvail().y - 112;
     if (remain > 0) ImGui::Dummy(ImVec2(0, remain));
     if (GhostBtn("DISCORD", -1, 32))
@@ -1237,13 +1199,11 @@ static void ScreenMain() {
     ImGui::EndChild();
     ImGui::SameLine();
 
-    // ---- conteudo ----
     ImGui::BeginChild("##content", ImVec2(0, -44));
     if (g.mainTab == 0) TabCatalogo();
     else                TabConta();
     ImGui::EndChild();
 
-    // ---- barra de status no rodape ----
     StatusArea();
     ImGui::SameLine(ImGui::GetContentRegionAvail().x - 20);
     ImGui::PushFont(F_Sm);
@@ -1260,11 +1220,10 @@ static void ScreenPay() {
     ImGui::TextColored(COL_DIM, "ESCANEIE COM O APP DO BANCO");
     ImGui::PopFont();
 
-    // QR centralizado
     float qrSize = 240;
     ImGui::SetCursorPosX((ImGui::GetContentRegionAvail().x - qrSize) * 0.5f + ImGui::GetStyle().WindowPadding.x);
     if (g_QrTex) {
-        // fundo branco atras do QR
+
         ImVec2 pos = ImGui::GetCursorScreenPos();
         ImGui::GetWindowDrawList()->AddRectFilled(pos,
             ImVec2(pos.x + qrSize + 16, pos.y + qrSize + 16),
@@ -1329,9 +1288,6 @@ static void ScreenPay() {
     }
 }
 
-// ============================================================================
-//  Frame
-// ============================================================================
 static void RenderFrame() {
     ImGui::SetNextWindowPos(ImVec2(0, 0));
     ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize);
@@ -1340,7 +1296,6 @@ static void RenderFrame() {
         ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
         ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoSavedSettings);
 
-    // particulas atras de todo o conteudo
     DrawParticles(ImGui::GetWindowDrawList(), ImGui::GetWindowPos(),
                   ImGui::GetWindowSize());
 
@@ -1353,9 +1308,6 @@ static void RenderFrame() {
     ImGui::End();
 }
 
-// ============================================================================
-//  Win32
-// ============================================================================
 static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp) {
     if (ImGui_ImplWin32_WndProcHandler(hWnd, msg, wp, lp))
         return true;
@@ -1363,7 +1315,7 @@ static LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
     case WM_GETMINMAXINFO: {
         auto* mmi = (MINMAXINFO*)lp;
-        mmi->ptMinTrackSize.x = 780;   // tamanho minimo da janela
+        mmi->ptMinTrackSize.x = 780;
         mmi->ptMinTrackSize.y = 560;
         return 0;
     }
@@ -1413,23 +1365,20 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nCmdShow) {
     ShowWindow(g_hWnd, nCmdShow);
     UpdateWindow(g_hWnd);
 
-    // dark title bar
     BOOL dark = TRUE;
     DwmSetWindowAttribute(g_hWnd, 20, &dark, sizeof(dark));
 
-    // ImGui
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
-    io.IniFilename = nullptr;   // sem imgui.ini sujando a pasta
+    io.IniFilename = nullptr;
     ImGui::StyleColorsDark();
 
-    // Segoe UI (com acentos pt-BR + travessao/bullets — acaba com os "?")
     static const ImWchar kRanges[] = {
-        0x0020, 0x00FF,   // Latin basico + Latin-1 (c, a, e, etc)
-        0x2010, 0x205E,   // hifens, travessao, bullets, reticencias
-        0x2190, 0x21FF,   // setas
-        0x2600, 0x26FF,   // simbolos variados
+        0x0020, 0x00FF,
+        0x2010, 0x205E,
+        0x2190, 0x21FF,
+        0x2600, 0x26FF,
         0,
     };
     const char* fReg  = "C:\\Windows\\Fonts\\segoeui.ttf";
@@ -1439,7 +1388,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nCmdShow) {
         fc.GlyphRanges = kRanges;
         fc.PixelSnapH  = true;
         if (FILE* f = fopen(path, "rb")) { fclose(f); }
-        else path = fReg;   // bold ausente -> regular
+        else path = fReg;
         ImFont* r = io.Fonts->AddFontFromFileTTF(path, px, &fc);
         if (!r) { ImFontConfig d; d.SizePixels = px; r = io.Fonts->AddFontDefault(&d); }
         return r;
@@ -1457,7 +1406,6 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nCmdShow) {
 
     InitParticles();
 
-    // produtos + auto-login
     g.hwid = GetHwid();
     std::thread(FetchProducts).detach();
     {
@@ -1473,7 +1421,6 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nCmdShow) {
         }
     }
 
-    // main loop
     ImVec4 clearCol = ImVec4(0.040f, 0.042f, 0.082f, 1.00f);
     MSG msg{};
     while (msg.message != WM_QUIT) {
@@ -1497,7 +1444,6 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nCmdShow) {
         g_pSwapChain->Present(1, 0);
     }
 
-    // cleanup
     if (g_QrTex) g_QrTex->Release();
     ImGui_ImplDX11_Shutdown();
     ImGui_ImplWin32_Shutdown();

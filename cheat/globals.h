@@ -1,8 +1,4 @@
 #pragma once
-// ============================================================================
-//  C4pt0r Cheats — Global State & Configuration
-//  FiveM internal cheat — DLL side
-// ============================================================================
 
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -25,7 +21,7 @@
 
 namespace C4pt0r
 {
-    // ------------------------------------------------------------------ Math
+
     struct Vec2 {
         float x = 0, y = 0;
         Vec2() = default;
@@ -51,13 +47,12 @@ namespace C4pt0r
         }
     };
 
-    // ------------------------------------------------------- Feature configs
     struct AimbotConfig {
         bool  enabled     = false;
-        float fov         = 15.0f;   // degrees
-        float smooth      = 5.0f;    // 1 = snap, higher = smoother
+        float fov         = 15.0f;
+        float smooth      = 5.0f;
         bool  visibleOnly = true;
-        int   targetBone  = 0;       // 0 = head, 1 = neck, 2 = chest
+        int   targetBone  = 0;
     };
 
     struct ESPConfig {
@@ -67,11 +62,11 @@ namespace C4pt0r
         bool  healthBars  = true;
         bool  snaplines   = false;
         bool  distance    = true;
-        int   filter      = 0;      // 0=todos 1=so normais 2=so god/admin
+        int   filter      = 0;
         float maxDistance  = 500.0f;
-        float boxColor[4]  = { 0.00f, 0.83f, 1.00f, 1.00f };  // cyan
+        float boxColor[4]  = { 0.00f, 0.83f, 1.00f, 1.00f };
         float nameColor[4] = { 1.00f, 1.00f, 1.00f, 1.00f };
-        float godColor[4]  = { 1.00f, 0.70f, 0.10f, 1.00f };  // dourado
+        float godColor[4]  = { 1.00f, 0.70f, 0.10f, 1.00f };
     };
 
     struct PlayerConfig {
@@ -86,31 +81,29 @@ namespace C4pt0r
     };
 
     struct TeleportConfig {
-        bool  toWaypoint = false;   // one-shot flag
+        bool  toWaypoint = false;
         float savedX = 0, savedY = 0, savedZ = 0;
         bool  hasSaved   = false;
-        bool  toSaved    = false;   // one-shot flag
-        // one-shot targets consumed by TickTeleport
+        bool  toSaved    = false;
+
         bool  toCoords   = false;
         float tx = 0, ty = 0, tz = 0;
-        int   toPlayerId    = -1;   // >=0 -> go to that player's position
-        int   bringPlayerId = -1;   // >=0 -> move that player to us
+        int   toPlayerId    = -1;
+        int   bringPlayerId = -1;
     };
 
     struct VehicleConfig {
-        bool  spawn    = false;     // one-shot flag
-        bool  warpIn   = true;      // enter vehicle after spawn
+        bool  spawn    = false;
+        bool  warpIn   = true;
         char  model[48] = {};
-        uint32_t modelHash = 0;     // >0 = spawna por hash (garagem)
-        // cor aplicada no veiculo logo depois do spawn (-1 = nao mexer)
+        uint32_t modelHash = 0;
+
         int   postPrim = -1, postSec = -1;
         bool  postCustom = false;
         float postPrimRgb[3] = {};
         float postSecRgb[3]  = {};
     };
 
-    // Garagem local: guarda o veiculo alvo (modelo + cores) pra respawnar.
-    // Nao e a garagem do server — e a sua lista de carros salvos.
     struct GarageEntry {
         char     name[32] = {};
         uint32_t model    = 0;
@@ -120,9 +113,8 @@ namespace C4pt0r
         float    secRgb[3]  = {};
     };
 
-    // ---------------------------------------------- Mundo / diversao
     struct FunConfig {
-        // toggles — re-applied while on (all OFF at inject)
+
         bool  superJump      = false;
         bool  noWanted       = false;
         bool  policeIgnore   = false;
@@ -134,7 +126,6 @@ namespace C4pt0r
         float timeScale      = 0.30f;
         bool  pauseTime      = false;
 
-        // one-shot world controls
         bool  setWeather     = false; int  weather  = 0;
         bool  clearWeather   = false;
         bool  setClock       = false; int  clockH   = 12; int clockM = 0;
@@ -143,7 +134,6 @@ namespace C4pt0r
         bool  fire           = false;
         bool  water          = false;
 
-        // ped/animal/npc spawning
         bool  spawnPed       = false;
         char  pedModel[48]   = {};
         bool  pedBodyguard   = false;
@@ -151,87 +141,73 @@ namespace C4pt0r
         bool  pigRain        = false;
         bool  clone          = false;
 
-        // vehicle fun
         bool  repairVeh      = false;
         bool  flipVeh        = false;
         bool  boostVeh       = false;
     };
 
-    // ---------------------------------------------- Mecanico / tunagem
-    //  One-shot ops consumidas pelo TickMechanic: menu so escreve flags,
-    //  a feature thread aplica os natives (mesmo padrao das outras feats)
     struct MechanicConfig {
-        bool  useNearest   = false;   // alvo = veiculo mais proximo (senao o seu)
+        bool  useNearest   = false;
 
-        bool  applyMods    = false;   // aplica sliders de performance/mods
-        bool  applyColors  = false;   // aplica cores/livrea
-        bool  applyExtras  = false;   // perolado/roda/fumaca/neon/vidro
-        bool  applyPower   = false;   // multiplicadores de motor/torque
-        bool  plate        = false;   // aplica texto da placa
-        bool  saveGarage   = false;   // guarda o veiculo alvo na garagem
+        bool  applyMods    = false;
+        bool  applyColors  = false;
+        bool  applyExtras  = false;
+        bool  applyPower   = false;
+        bool  plate        = false;
+        bool  saveGarage   = false;
         char  plateText[16] = {};
-        char  status[96]   = {};      // feedback do TickMechanic pro menu
+        char  status[96]   = {};
 
-        // performance / mods (slot LSC) — -1 = nao aplicar
-        int   engine = -1;   // 11
-        int   brakes = -1;   // 12
-        int   trans  = -1;   // 13
-        int   susp   = -1;   // 15
-        int   armor  = -1;   // 16
-        int   horn   = -1;   // 14
-        int   wheels = -1;   // 23
+        int   engine = -1;
+        int   brakes = -1;
+        int   trans  = -1;
+        int   susp   = -1;
+        int   armor  = -1;
+        int   horn   = -1;
+        int   wheels = -1;
         int   wheelType = -1;
-        int   livery = -1;   // 48
+        int   livery = -1;
         bool  turbo   = false;
         bool  xenon   = false;
-        bool  bpTires = false;   // pneus a prova de bala
+        bool  bpTires = false;
 
-        // cores — -1 = nao aplicar
         int   colPrim  = -1;
         int   colSec   = -1;
         int   pearl    = -1;
         int   wheelCol = -1;
-        int   winTint  = -1;   // 0-6
+        int   winTint  = -1;
         bool  useCustomCol = false;
         float primRgb[3] = { 1.00f, 0.23f, 0.23f };
         float secRgb[3]  = { 0.12f, 0.12f, 0.12f };
 
-        // neon / fumaca
         bool  neonOn   = false;
         float neonRgb[3]  = { 0.00f, 0.83f, 1.00f };
         float smokeRgb[3] = { 0.00f, 0.83f, 1.00f };
 
-        float engineMult = 0.f;   // >0 aplica
+        float engineMult = 0.f;
         float torqueMult = 0.f;
     };
 
-    // ------------------------------------ Acoes em OUTROS jogadores
-    //  No FiveM cada cliente e dono do proprio ped — dar god ou agarrar
-    //  alguem so tem efeito real se o server ceder controle da entidade.
-    //  Sem controle vira efeito local (so voce ve). O cheat pede controle
-    //  antes e loga o resultado.
     struct PlayerActionsConfig {
-        int   giveGodId    = -1;     // one-shot: dar god nesse player id
-        int   reviveId     = -1;     // one-shot: ressuscitar esse player id
-        int   grabId       = -1;     // one-shot: comecar a carregar esse id
-        bool  releaseGrab  = false;  // one-shot: soltar quem esta carregado
-        bool  grabActive   = false;  // estado — tem alguem carregado (menu le)
+        int   giveGodId    = -1;
+        int   reviveId     = -1;
+        int   grabId       = -1;
+        bool  releaseGrab  = false;
+        bool  grabActive   = false;
     };
 
-    // ---------------------------------------------- Executor de Lua
     struct LuaConfig {
-        char  code[8192] = "";    // script custom do editor
-        bool  run        = false; // one-shot: executar code agora
-        int   preset     = 0;     // 1 revive alvo / 2 carry alvo / 3 god alvo / 4 reviver eu
-        int   targetId   = -1;    // player local id do preset
+        char  code[8192] = "";
+        bool  run        = false;
+        int   preset     = 0;
+        int   targetId   = -1;
     };
 
-    // ---------------------------------------------- Armas
     struct WeaponConfig {
         bool  give        = false;
         char  model[48]   = "weapon_carbinerifle";
         int   ammo        = 250;
-        bool  attachments = false;   // tenta dar acessorios comuns junto
+        bool  attachments = false;
         bool  giveAll     = false;
         bool  stripAll    = false;
         bool  refillAll   = false;
@@ -244,26 +220,23 @@ namespace C4pt0r
         bool showWatermark = true;
     };
 
-    // ------------------------------------------------- Farm / macro config
     struct FarmConfig {
-        bool  running      = false;   // master switch for the farm loop
-        bool  hasPointA    = false;   // "coleta" marker position
+        bool  running      = false;
+        bool  hasPointA    = false;
         float ax = 0, ay = 0, az = 0;
-        bool  hasPointB    = false;   // "venda" marker position
+        bool  hasPointB    = false;
         float bx = 0, by = 0, bz = 0;
 
-        int   keyControl   = 51;      // INPUT_CONTEXT (E) — RP jobs default
-        int   holdFrames   = 2;       // frames the key stays pressed
-        int   settleMs     = 1200;    // wait after teleport before pressing
-        int   intervalMs   = 1500;    // wait after key before next step
-        int   repeatTimes  = 0;       // 0 = forever
-        int   cyclesDone   = 0;       // progress counter
+        int   keyControl   = 51;
+        int   holdFrames   = 2;
+        int   settleMs     = 1200;
+        int   intervalMs   = 1500;
+        int   repeatTimes  = 0;
+        int   cyclesDone   = 0;
 
-        // live inspector state (written by Tick, read by menu)
-        bool  inspEnabled  = false;   // OFF by default — user opts in
+        bool  inspEnabled  = false;
     };
 
-    // Live inspector snapshot — refreshed every tick when enabled
     struct InspectorData {
         int   ped        = 0;
         int   player     = 0;
@@ -276,11 +249,10 @@ namespace C4pt0r
         int   vehicle    = 0;
         uint32_t weapon  = 0;
         char  name[64]   = {};
-        // last-pressed control ids this frame (for action capture)
+
         int   pressed[8] = {};
     };
 
-    // ---------------------------------------- ESP shared data (thread-safe)
     struct PlayerESPData {
         bool  active   = false;
         int   playerId = -1;
@@ -295,10 +267,9 @@ namespace C4pt0r
         char  name[64] = {};
         bool  isDead   = false;
         bool  inVehicle = false;
-        bool  god      = false;   // invencivel -> provavel admin
+        bool  god      = false;
     };
 
-    // Lightweight row for the player list (menu teleport/inspect)
     struct PlayerListEntry {
         int   id        = -1;
         int   ped       = 0;
@@ -310,7 +281,6 @@ namespace C4pt0r
         char  name[64]  = {};
     };
 
-    // ------------------------------------------------------- Global singletons
     inline AimbotConfig    g_Aimbot;
     inline ESPConfig       g_ESP;
     inline PlayerConfig    g_Player;
@@ -323,20 +293,16 @@ namespace C4pt0r
     inline HMODULE           g_Module   = nullptr;
     inline HWND              g_GameWindow = nullptr;
 
-    // D3D11
     inline ID3D11Device*            g_Device       = nullptr;
     inline ID3D11DeviceContext*     g_DeviceContext = nullptr;
     inline IDXGISwapChain*          g_SwapChain    = nullptr;
     inline ID3D11RenderTargetView*  g_RenderTarget = nullptr;
 
-    // ESP shared buffer
     constexpr int MAX_PLAYERS = 256;
     inline PlayerESPData    g_PlayersData[MAX_PLAYERS] = {};
     inline PlayerListEntry  g_PlayerList[MAX_PLAYERS] = {};
     inline int              g_PlayerListCount = 0;
-    // timed_mutex + try_lock: um zumbi segurando esse lock (morreu dentro
-    // de um native) nao pode mais matar toda thread nova no lock_guard —
-    // foi isso que criou o loop infinito de respawns mortos
+
     inline std::timed_mutex g_DataMutex;
     inline VehicleConfig    g_Vehicle;
     inline FunConfig        g_Fun;
@@ -348,7 +314,6 @@ namespace C4pt0r
     inline std::mutex               g_GarageMtx;
     inline int           g_ScreenWidth  = 1920;
     inline int           g_ScreenHeight = 1080;
-    // setado pelo MainThread quando o init de natives termina (ok ou nao) —
-    // a feature thread espera isso antes de começar a tickar
+
     inline std::atomic<bool> g_InitDone{false};
 }

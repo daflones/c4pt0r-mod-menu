@@ -1,7 +1,4 @@
-// ============================================================================
-//  C4pt0r Cheats — DLL Entry Point
-//  Spawns main thread, initializes subsystems, runs feature loop
-// ============================================================================
+
 
 #include "globals.h"
 #include "hooks.h"
@@ -16,13 +13,6 @@
 
 using namespace C4pt0r;
 
-// ---- Module hiding ------------------------------------------------------
-//  LoadLibrary injection leaves us in the PEB module lists — the first
-//  thing any integrity check enumerates. Unlink our LDR_DATA_TABLE_ENTRY
-//  from all three lists; keep the neighbors so we can relink before unload.
-//
-//  Newer SDKs strip _PEB_LDR_DATA down to InMemoryOrderModuleList only —
-//  use raw offsets into the real layout instead.
 static PLIST_ENTRY s_SavedLinks[3]  = {};
 static PLIST_ENTRY s_SavedBlink[3]  = {};
 static bool        s_Unlinked       = false;
@@ -32,10 +22,6 @@ static void HideModule(HMODULE hMod)
     PPEB peb = reinterpret_cast<PPEB>(__readgsqword(0x60));
     if (!peb || !peb->Ldr) return;
 
-    // PEB_LDR_DATA (real): Length(4) Initialized(1) pad(3) SsHandle(8)
-    //   InLoadOrderModuleList        +0x10
-    //   InMemoryOrderModuleList      +0x20
-    //   InInitializationOrderModule  +0x30
     PLIST_ENTRY heads[3] = {
         reinterpret_cast<PLIST_ENTRY>(
             reinterpret_cast<uintptr_t>(peb->Ldr) + 0x10),
@@ -44,12 +30,12 @@ static void HideModule(HMODULE hMod)
         reinterpret_cast<PLIST_ENTRY>(
             reinterpret_cast<uintptr_t>(peb->Ldr) + 0x30),
     };
-    const int linkOff[3] = { 0x00, 0x10, 0x20 };   // offsets in LDR entry
+    const int linkOff[3] = { 0x00, 0x10, 0x20 };
 
     for (int k = 0; k < 3; ++k) {
         for (PLIST_ENTRY e = heads[k]->Flink; e != heads[k]; e = e->Flink) {
             uintptr_t entry = reinterpret_cast<uintptr_t>(e) - linkOff[k];
-            PVOID base = *reinterpret_cast<PVOID*>(entry + 0x30); // DllBase
+            PVOID base = *reinterpret_cast<PVOID*>(entry + 0x30);
             if (base == hMod) {
                 s_SavedLinks[k] = e;
                 s_SavedBlink[k] = e->Blink;
@@ -81,20 +67,12 @@ static int64_t NowMs()
         std::chrono::steady_clock::now().time_since_epoch()).count();
 }
 
-// ---- Feature loop (runs on its own thread, watched by the supervisor) ---
-//  Generation check: when the supervisor detects the loop hung inside a
-//  blocked native it bumps s_FeatureGen — the zombie loop exits as soon as
-//  its blocked call returns, while a fresh loop takes over immediately.
 static std::atomic<uint64_t> s_FeatureGen{0};
 static std::atomic<int>      s_FeatureThreads{0};
 
-//  g_TickStage values outside Features::Tick (1-13 sao os sub-ticks):
-//    90=entry  91=loop-top  92=in-Tick call  93=watchdog  94=sleep
-//    95=recovery-wait  96=ReInitialize  97=RestoreEntity  99=exiting
 static void FeatureLoop()
 {
-    // espera o init de natives do MainThread (timeout 40s — se falhar
-    // tudo, cai no loop mesmo assim e o recovery tenta de tempos em tempos)
+
     Natives::g_TickStage = 89;
     int waited = 0;
     while (g_Running && !g_InitDone.load() && waited < 400) {
@@ -106,10 +84,6 @@ static void FeatureLoop()
     Log::Write("Feature thread iniciada (gen %llu, threads=%d)",
                (unsigned long long)myGen, s_FeatureThreads.load());
 
-    // Backup driver: o tick roda mesmo na thread de render (Present) —
-    // o adhesive suspende threads estrangeiras, nao a do jogo. Essa
-    // thread so dirige se o Present parar (hook caiu, jogo suspenso);
-    // o gate atomico do FrameTick garante um driver so.
     while (g_Running && s_FeatureGen.load() == myGen) {
         Features::FrameTick();
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
@@ -120,8 +94,6 @@ static void FeatureLoop()
                (unsigned long long)myGen, s_FeatureThreads.load());
 }
 
-//  CreateThread puro: std::thread teria destrutor e impediria __try no
-//  MainThread (C2712)
 static DWORD WINAPI FeatureThreadProc(LPVOID) { FeatureLoop(); return 0; }
 static void SpawnFeatureLoop()
 {
@@ -129,18 +101,15 @@ static void SpawnFeatureLoop()
     if (h) CloseHandle(h);
 }
 
-// ---- Main cheat thread --------------------------------------------------
 static void MainThread(HMODULE hModule)
 {
     Log::Init();
     Log::Write("C4pt0r Cheats starting...");
     Log::Write("DLL loaded at 0x%p", hModule);
 
-    // Drop off the PEB module lists before doing anything else
     HideModule(hModule);
     Log::Write("Module unlinked from PEB lists.");
 
-    // Wait for game window
     Log::Write("Waiting for game window (grcWindow)...");
     int waitCount = 0;
     while (!FindWindowW(L"grcWindow", nullptr) && g_Running) {
@@ -161,7 +130,6 @@ static void MainThread(HMODULE hModule)
     Log::Write("Game window found! Waiting 3s for full load...");
     std::this_thread::sleep_for(std::chrono::seconds(3));
 
-    // ---- Initialize D3D11 hooks (ImGui menu) ----
     Log::Write("Initializing D3D11 hooks...");
     if (!Hooks::Initialize()) {
         Log::Write("FATAL: D3D11 hook failed. Aborting.");
@@ -171,7 +139,6 @@ static void MainThread(HMODULE hModule)
     }
     Log::Write("D3D11 hooks OK.");
 
-    // ---- Initialize native system (with crash protection) ----
     Log::Write("Initializing native system...");
     bool nativesOk = false;
     for (int attempt = 0; attempt < 10 && g_Running; ++attempt) {
@@ -194,15 +161,10 @@ static void MainThread(HMODULE hModule)
     } else {
         Log::Write("Native system OK.");
     }
-    g_InitDone = true;   // libera a feature thread (criada no DllMain)
+    g_InitDone = true;
 
     Log::Write("Entering supervisor loop. F9 = menu, END = unload.");
 
-    // ---- Supervisor ----------------------------------------------------
-    //  A feature thread eh criada no DllMain — na janela da injecao.
-    //  Threads criadas DEPOIS (CreateThread pos-injecao) nunca executam:
-    //  o "iniciada" nunca aparece no log. O supervisor aqui so vigia o
-    //  heartbeat e tenta respawn como bonus (se nao iniciar, sem custo).
     Natives::g_TickBeat = NowMs();
 
     while (g_Running) {
@@ -212,8 +174,7 @@ static void MainThread(HMODULE hModule)
         int64_t beat = Natives::g_TickBeat.load();
         int64_t staleMs = beat ? NowMs() - beat : 0;
         if (staleMs > 4000) {
-            // muitos zumbis = o hang e sistemico (mutex preso, lock do
-            // loader...). nao adianta spawnar mais — loga uma vez e para
+
             if (s_FeatureThreads.load() >= 8) {
                 static bool warnedCap = false;
                 if (!warnedCap) {
@@ -234,10 +195,9 @@ static void MainThread(HMODULE hModule)
                        Natives::g_TickStage.load(),
                        s_FeatureThreads.load());
             if (hungPath) Natives::RetirePath(hungPath);
-            ++s_FeatureGen;                        // mata o loop velho quando destravar
+            ++s_FeatureGen;
             Natives::g_TickBeat = NowMs();
-            // threads criadas pos-injecao podem ser bloqueadas pelo jogo —
-            // se 3 spawns seguidos nunca iniciaram, para de vazar stacks
+
             static int deadSpawns = 0;
             if (deadSpawns < 3) {
                 SpawnFeatureLoop();
@@ -247,24 +207,19 @@ static void MainThread(HMODULE hModule)
                     Log::Write("SUPERVISOR: novas threads nao iniciam "
                                "(bloqueio pos-injecao) — respawn desligado.");
             }
-            __try { Features::RestoreEntity(); }   // devolve o ped por seguranca
+            __try { Features::RestoreEntity(); }
             __except (EXCEPTION_EXECUTE_HANDLER) {}
             std::this_thread::sleep_for(std::chrono::milliseconds(2000));
         }
     }
 
-    // ---- Cleanup ----
     Log::Write("Shutting down...");
-    // devolve o ped ao normal antes de sair — nunca deixar invisivel/
-    // sem colisao preso depois do unload
+
     if (nativesOk || Natives::IsReady()) {
         __try { Features::RestoreAll(); }
         __except (EXCEPTION_EXECUTE_HANDLER) {}
     }
 
-    // Espera as feature threads sairem — se alguma esta travada dentro de
-    // um native ela nunca volta, e liberar a DLL com codigo nosso em
-    // execucao = crash. Nesse caso vazamos o modulo em vez de crashar.
     for (int i = 0; i < 40 && s_FeatureThreads.load() > 0; ++i)
         std::this_thread::sleep_for(std::chrono::milliseconds(50));
     const bool zombieLeft = s_FeatureThreads.load() > 0;
@@ -279,7 +234,6 @@ static void MainThread(HMODULE hModule)
         return;
     }
 
-    // Relink so FreeLibrary can find our LDR entry again
     RelinkModule();
 
     Log::Write("Unloaded cleanly. Bye!");
@@ -287,17 +241,12 @@ static void MainThread(HMODULE hModule)
     FreeLibraryAndExitThread(hModule, 0);
 }
 
-// ---- DLL entry -----------------------------------------------------------
-BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID /*reserved*/)
+BOOL APIENTRY DllMain(HMODULE hModule, DWORD reason, LPVOID )
 {
     if (reason == DLL_PROCESS_ATTACH) {
         DisableThreadLibraryCalls(hModule);
         g_Module = hModule;
 
-        // Duas threads na janela da injecao: features + supervisor.
-        // Threads criadas depois (CreateThread pos-injecao) sao bloqueadas
-        // pelo jogo/anticheat — nunca executam. Por isso a feature thread
-        // nasce aqui, nao sob demanda.
         auto* t = new std::thread(MainThread, hModule);
         t->detach();
         auto* f = new std::thread(FeatureThreadProc, nullptr);
