@@ -170,6 +170,7 @@ namespace C4pt0r
         bool  plate        = false;   // aplica texto da placa
         bool  saveGarage   = false;   // guarda o veiculo alvo na garagem
         char  plateText[16] = {};
+        char  status[96]   = {};      // feedback do TickMechanic pro menu
 
         // performance / mods (slot LSC) — -1 = nao aplicar
         int   engine = -1;   // 11
@@ -211,6 +212,7 @@ namespace C4pt0r
     //  antes e loga o resultado.
     struct PlayerActionsConfig {
         int   giveGodId    = -1;     // one-shot: dar god nesse player id
+        int   reviveId     = -1;     // one-shot: ressuscitar esse player id
         int   grabId       = -1;     // one-shot: comecar a carregar esse id
         bool  releaseGrab  = false;  // one-shot: soltar quem esta carregado
         bool  grabActive   = false;  // estado — tem alguem carregado (menu le)

@@ -233,6 +233,19 @@ namespace C4pt0r::Menu
             ImGui::SliderFloat("Velocidade##noclip", &g_Player.noclipSpeed, 0.5f, 20.0f, "%.1f");
         }
 
+        SectionHeader("EFEITOS");
+        ImGui::Checkbox("Super pulo", &g_Fun.superJump);
+        ImGui::SameLine();
+        ImGui::Checkbox("Nunca procurado", &g_Fun.noWanted);
+        ImGui::Checkbox("Policia me ignora", &g_Fun.policeIgnore);
+        ImGui::SameLine();
+        ImGui::Checkbox("Todos me ignoram", &g_Fun.everyoneIgnore);
+        ImGui::Checkbox("Bebado", &g_Fun.drunk);
+        ImGui::SameLine();
+        ImGui::Checkbox("Visao termica", &g_Fun.thermal);
+        ImGui::SameLine();
+        ImGui::Checkbox("Visao noturna", &g_Fun.nightvision);
+
         SectionHeader("EMERGENCIA");
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.55f, 0.12f, 0.16f, 0.80f));
         if (ImGui::Button("RESTAURAR TUDO", ImVec2(-1, 32))) {
@@ -252,6 +265,77 @@ namespace C4pt0r::Menu
         { "Sul (Porto de LS)",          -505.4f, -2323.7f,  6.4f },
     };
 
+    // ---- JOGADORES: lista, acoes em outros players ----------------------
+    static void TabPlayers()
+    {
+        SectionHeader("JOGADORES ONLINE");
+
+        static int s_SelPlayer = -1;
+        // try_lock: nunca deixar a thread de render travar no mutex
+        if (g_DataMutex.try_lock_for(std::chrono::milliseconds(10))) {
+            ImGui::BeginChild("##plist", ImVec2(0, 150), ImGuiChildFlags_Border);
+            if (g_PlayerListCount == 0) {
+                ImGui::TextDisabled("  Nenhum jogador online visivel.");
+            }
+            for (int i = 0; i < g_PlayerListCount; ++i) {
+                const auto& p = g_PlayerList[i];
+                char label[128];
+                snprintf(label, sizeof(label), "[%2d] %s  %.0fm%s%s",
+                    p.id, p.name, p.distance,
+                    p.inVehicle ? "  carro" : "",
+                    p.dead ? "  morto" : "");
+                if (ImGui::Selectable(label, s_SelPlayer == p.id))
+                    s_SelPlayer = p.id;
+            }
+            ImGui::EndChild();
+            g_DataMutex.unlock();
+        }
+
+        // TP direto por ID digitado — nao precisa selecionar na lista
+        static int s_IdInput = 0;
+        ImGui::SetNextItemWidth(-70);
+        ImGui::InputInt("ID do jogador##pid", &s_IdInput);
+        ImGui::SameLine();
+        if (ImGui::Button("USAR ID##pidbtn", ImVec2(-1, 0)) && s_IdInput >= 0)
+            s_SelPlayer = s_IdInput;
+        Tooltip("Digita o ID pra agir nele sem precisar achar na lista.");
+
+        if (s_SelPlayer < 0) {
+            ImGui::TextDisabled("Seleciona alguem na lista pra liberar as acoes.");
+            return;
+        }
+        ImGui::TextDisabled("Selecionado: ID %d", s_SelPlayer);
+
+        SectionHeader("TELEPORTE");
+        if (ImGui::Button("IR ATE ELE", ImVec2(ImGui::GetContentRegionAvail().x * 0.48f, 30)))
+            g_Teleport.toPlayerId = s_SelPlayer;
+        ImGui::SameLine();
+        if (ImGui::Button("TRAZER PRA MIM", ImVec2(-1, 30)))
+            g_Teleport.bringPlayerId = s_SelPlayer;
+        Tooltip("Trazer o jogador pra perto de voce (efeito local).");
+
+        SectionHeader("ACOES");
+        if (ImGui::Button("DAR GOD", ImVec2(ImGui::GetContentRegionAvail().x * 0.48f, 30)))
+            g_PActions.giveGodId = s_SelPlayer;
+        ImGui::SameLine();
+        if (ImGui::Button("RESSUSCITAR", ImVec2(-1, 30)))
+            g_PActions.reviveId = s_SelPlayer;
+        Tooltip("Dispara o evento de paramedico pro server reanimar o alvo "
+                "(igual o trabalho de medico). Se nenhum resource responder, "
+                "faz revive local se o server der controle.");
+
+        if (g_PActions.grabActive) {
+            if (ImGui::Button("SOLTAR PLAYER", ImVec2(-1, 30)))
+                g_PActions.releaseGrab = true;
+        } else {
+            if (ImGui::Button("AGARRAR/CARREGAR", ImVec2(-1, 30)))
+                g_PActions.grabId = s_SelPlayer;
+            Tooltip("Carrega o jogador no ombro, igual o H dos empregos. "
+                    "Dispara evento de server; attach local so com controle.");
+        }
+    }
+
+    // ---- Teleporte: waypoint, presets, coords, posicoes salvas -----------
     static void TabTeleport()
     {
         SectionHeader("TELEPORTE RAPIDO");
@@ -297,92 +381,6 @@ namespace C4pt0r::Menu
                 g_Teleport.toSaved = true;
             }
         }
-
-        // ---- Players ----
-        SectionHeader("JOGADORES");
-
-        static int s_SelPlayer = -1;
-        // try_lock: nunca deixar a thread de render travar no mutex
-        if (g_DataMutex.try_lock_for(std::chrono::milliseconds(10))) {
-            ImGui::BeginChild("##plist", ImVec2(0, 120), ImGuiChildFlags_Border);
-            if (g_PlayerListCount == 0) {
-                ImGui::TextDisabled("  Nenhum jogador online visivel.");
-            }
-            for (int i = 0; i < g_PlayerListCount; ++i) {
-                const auto& p = g_PlayerList[i];
-                char label[128];
-                snprintf(label, sizeof(label), "[%2d] %s  %.0fm%s%s",
-                    p.id, p.name, p.distance,
-                    p.inVehicle ? "  carro" : "",
-                    p.dead ? "  morto" : "");
-                if (ImGui::Selectable(label, s_SelPlayer == p.id))
-                    s_SelPlayer = p.id;
-            }
-            ImGui::EndChild();
-            g_DataMutex.unlock();
-        }
-
-        if (s_SelPlayer >= 0) {
-            ImGui::TextDisabled("Selecionado: ID %d", s_SelPlayer);
-            if (ImGui::Button("IR ATE ELE", ImVec2(ImGui::GetContentRegionAvail().x * 0.48f, 30)))
-                g_Teleport.toPlayerId = s_SelPlayer;
-            ImGui::SameLine();
-            if (ImGui::Button("TRAZER PRA MIM", ImVec2(-1, 30)))
-                g_Teleport.bringPlayerId = s_SelPlayer;
-            Tooltip("Trazer o jogador pra perto de voce (efeito local).");
-
-            if (ImGui::Button("DAR GOD", ImVec2(ImGui::GetContentRegionAvail().x * 0.48f, 30)))
-                g_PActions.giveGodId = s_SelPlayer;
-            Tooltip("Deixa o jogador selecionado invencivel (efetivo so se o server der controle).");
-            ImGui::SameLine();
-            if (g_PActions.grabActive) {
-                if (ImGui::Button("SOLTAR PLAYER", ImVec2(-1, 30)))
-                    g_PActions.releaseGrab = true;
-            } else {
-                if (ImGui::Button("AGARRAR/CARREGAR", ImVec2(-1, 30)))
-                    g_PActions.grabId = s_SelPlayer;
-                Tooltip("Carrega o jogador no ombro, igual o H dos empregos.");
-            }
-        }
-
-        // TP direto por ID digitado — nao precisa selecionar na lista
-        static int s_IdInput = 0;
-        ImGui::SetNextItemWidth(-70);
-        ImGui::InputInt("ID do jogador##tpid", &s_IdInput);
-        ImGui::SameLine();
-        if (ImGui::Button("IR##tpidbtn", ImVec2(-1, 0)) && s_IdInput >= 0)
-            g_Teleport.toPlayerId = s_IdInput;
-        Tooltip("Digita o ID do jogador e teleporta direto ate ele.");
-
-        // ---- Vehicles ----
-        SectionHeader("SPAWN DE VEICULO");
-
-        static const char* vehNames[] = {
-            "Adder", "T20", "Oppressor MK2", "Kuruma blindado",
-            "Insurgent", "Sultan RS", "Vigilante", "Sparrow (heli)", "Rhino (tanque)"
-        };
-        static const char* vehModels[] = {
-            "adder", "t20", "oppressor2", "kuruma2",
-            "insurgent2", "sultanrs", "vigilante", "sparrow", "rhino"
-        };
-        static int s_VehIdx = 0;
-        ImGui::Combo("##vehpreset", &s_VehIdx, vehNames, IM_ARRAYSIZE(vehNames));
-
-        static char s_CustomModel[48] = "";
-        ImGui::SetNextItemWidth(-1);
-        ImGui::InputTextWithHint("##vehmodel", "ou digite o modelo (ex: zentorno)",
-                                 s_CustomModel, sizeof(s_CustomModel));
-
-        ImGui::Checkbox("Entrar no veiculo ao spawnar##veh", &g_Vehicle.warpIn);
-
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.00f, 0.55f, 0.30f, 0.80f));
-        if (ImGui::Button("SPAWNAR VEICULO", ImVec2(-1, 34))) {
-            const char* m = s_CustomModel[0] ? s_CustomModel : vehModels[s_VehIdx];
-            strncpy_s(g_Vehicle.model, m, sizeof(g_Vehicle.model) - 1);
-            g_Vehicle.spawn = true;
-        }
-        ImGui::PopStyleColor();
-        Tooltip("Spawn so funciona se o servidor permitir criacao de entidades.");
     }
 
     // ---- MUNDO: clima, tempo, gravidade, caos, spawns, veiculo fun -------
@@ -418,19 +416,6 @@ namespace C4pt0r::Menu
         ImGui::Checkbox("Camera lenta", &g_Fun.slowmo);
         if (g_Fun.slowmo)
             ImGui::SliderFloat("Escala##ts", &g_Fun.timeScale, 0.05f, 1.0f, "%.2fx");
-
-        SectionHeader("EFEITOS NO JOGADOR");
-        ImGui::Checkbox("Super pulo", &g_Fun.superJump);
-        ImGui::SameLine();
-        ImGui::Checkbox("Nunca procurado", &g_Fun.noWanted);
-        ImGui::Checkbox("Policia me ignora", &g_Fun.policeIgnore);
-        ImGui::SameLine();
-        ImGui::Checkbox("Todos me ignoram", &g_Fun.everyoneIgnore);
-        ImGui::Checkbox("Bebado", &g_Fun.drunk);
-        ImGui::SameLine();
-        ImGui::Checkbox("Visao termica", &g_Fun.thermal);
-        ImGui::SameLine();
-        ImGui::Checkbox("Visao noturna", &g_Fun.nightvision);
 
         SectionHeader("CAOS");
         if (ImGui::Button("EXPLODIR A FRENTE", ImVec2(-1, 30))) g_Fun.explode = true;
@@ -473,20 +458,45 @@ namespace C4pt0r::Menu
         }
         ImGui::PopStyleColor();
         Tooltip("Spawn local — em RP serio outros jogadores podem nao ver.");
-
-        SectionHeader("VEICULO ATUAL");
-        if (ImGui::Button("Consertar / limpar", ImVec2(-1, 30))) g_Fun.repairVeh = true;
-        if (ImGui::Button("Virar pra cima", ImVec2(-1, 30)))     g_Fun.flipVeh = true;
-        if (ImGui::Button("TURBO +35 m/s", ImVec2(-1, 30)))      g_Fun.boostVeh = true;
     }
 
-    // ---- Veiculo: mecanico completo em qualquer lugar ---------------------
+    // ---- Veiculo: spawn + mecanico completo em qualquer lugar ------------
     static void TabVeiculo()
     {
+        SectionHeader("SPAWN DE VEICULO");
+        static const char* vehNames[] = {
+            "Adder", "T20", "Oppressor MK2", "Kuruma blindado",
+            "Insurgent", "Sultan RS", "Vigilante", "Sparrow (heli)", "Rhino (tanque)"
+        };
+        static const char* vehModels[] = {
+            "adder", "t20", "oppressor2", "kuruma2",
+            "insurgent2", "sultanrs", "vigilante", "sparrow", "rhino"
+        };
+        static int s_VehIdx = 0;
+        ImGui::Combo("##vehpreset", &s_VehIdx, vehNames, IM_ARRAYSIZE(vehNames));
+
+        static char s_CustomModel[48] = "";
+        ImGui::SetNextItemWidth(-1);
+        ImGui::InputTextWithHint("##vehmodel", "ou digite o modelo (ex: zentorno)",
+                                 s_CustomModel, sizeof(s_CustomModel));
+
+        ImGui::Checkbox("Entrar no veiculo ao spawnar##veh", &g_Vehicle.warpIn);
+
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.00f, 0.55f, 0.30f, 0.80f));
+        if (ImGui::Button("SPAWNAR VEICULO", ImVec2(-1, 34))) {
+            const char* m = s_CustomModel[0] ? s_CustomModel : vehModels[s_VehIdx];
+            strncpy_s(g_Vehicle.model, m, sizeof(g_Vehicle.model) - 1);
+            g_Vehicle.spawn = true;
+        }
+        ImGui::PopStyleColor();
+        Tooltip("Spawn so funciona se o servidor permitir criacao de entidades.");
+
         SectionHeader("ALVO");
         ImGui::Checkbox("Veiculo mais proximo (em vez do que estou dentro)",
                         &g_Mech.useNearest);
         ImGui::TextDisabled("Busca num raio de 25m. -1 = nao alterar.");
+        if (g_Mech.status[0])
+            ImGui::TextDisabled("%s", g_Mech.status);
 
         SectionHeader("PERFORMANCE");
         ImGui::SliderInt("Motor",        &g_Mech.engine, -1, 4);
@@ -803,6 +813,7 @@ namespace C4pt0r::Menu
         SideTab("Combat",    0, tabW);
         SideTab("Visuals",   1, tabW);
         SideTab("Player",    2, tabW);
+        SideTab("Jogadores", 9, tabW);
         SideTab("Teleport",  3, tabW);
         SideTab("Veiculo",   7, tabW);
         SideTab("Armas",     8, tabW);
@@ -833,6 +844,7 @@ namespace C4pt0r::Menu
             case 6: TabSettings(); break;
             case 7: TabVeiculo();  break;
             case 8: TabArmas();    break;
+            case 9: TabPlayers();  break;
         }
 
         ImGui::EndChild();

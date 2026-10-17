@@ -868,15 +868,27 @@ namespace C4pt0r::Features
         if (!any) return;
         int ped = Natives::PlayerPedId();
         int veh = ped ? MechTargetVeh(ped) : 0;
-        if (veh && !MechHasControl(veh)) {
-            if (++s_MechCtrlTries < 60) return;   // ~1s pedindo controle
+        // dentro do veiculo = nosso — aplica direto, sem precisar provar
+        // controle (os natives de controle falham ou mentem em alguns builds)
+        bool inside = veh && Natives::IsPedInAnyVehicle(ped) &&
+                      Natives::GetVehiclePedIsIn(ped) == veh;
+        if (veh && !inside && !MechHasControl(veh)) {
+            if (++s_MechCtrlTries < 60) {   // ~2s pedindo controle
+                snprintf(g_Mech.status, sizeof(g_Mech.status),
+                         "pedindo controle do veiculo... (%d/60)", s_MechCtrlTries);
+                return;
+            }
             s_MechCtrlTries = 0;
             veh = 0;
-            Log::Write("Mecanico: sem controle do veiculo (de outro player?) — cancelado.");
+            snprintf(g_Mech.status, sizeof(g_Mech.status),
+                     "sem controle — veiculo e de outro player.");
+            Log::Write("Mecanico: sem controle do veiculo — cancelado (evita crash).");
         } else {
             s_MechCtrlTries = 0;
         }
         if (veh) {
+            snprintf(g_Mech.status, sizeof(g_Mech.status),
+                     inside ? "aplicado no seu veiculo." : "controle ok — aplicado.");
             if (g_Mech.saveGarage) MechSaveToGarage(veh);
             if (g_Mech.applyMods)   MechApplyMods(veh);
             if (g_Mech.applyColors) MechApplyColors(veh);
@@ -895,6 +907,9 @@ namespace C4pt0r::Features
                 uint64_t a[2] = { (uint64_t)veh, (uint64_t)g_Mech.plateText };
                 CN("SET_VEHICLE_NUMBER_PLATE_TEXT", a, 2);
             }
+        } else if (!veh) {
+            snprintf(g_Mech.status, sizeof(g_Mech.status),
+                     "nenhum veiculo alvo (entre num carro ou ative 'mais proximo').");
         }
         g_Mech.applyMods = g_Mech.applyColors = g_Mech.applyExtras = false;
         g_Mech.applyPower = g_Mech.plate = g_Mech.saveGarage = false;
@@ -1429,16 +1444,75 @@ namespace C4pt0r::Features
             if (!tped) {
                 Log::Write("God: id %d sem ped (offline?).", target);
             } else {
-                bool ctrl = MechHasControl(tped);   // pede controle tambem
-                uint64_t a[2] = { (uint64_t)tped, 1 };
-                CN("SET_ENTITY_INVINCIBLE", a, 2);
-                uint64_t pr[9] = { (uint64_t)tped, 1,1,1,1,1,1,1,1 };
-                CN("SET_ENTITY_PROOFS", pr, 9);
-                uint64_t rg[2] = { (uint64_t)tped, 0 };
-                CN("SET_PED_CAN_RAGDOLL", rg, 2);
-                Log::Write(ctrl ? "God dado no id %d (controle ok — efetivo)."
-                                : "God no id %d — SEM controle do ped, efeito so local.",
-                           target);
+                // SEM controle nao toca no ped remoto — mutar estado de
+                // ped de outro player sem ownership corrompe o sync e
+                // crasha o jogo ~segundos depois (crash nos dumps).
+                if (!MechHasControl(tped)) {
+                    Log::Write("God no id %d: SEM controle — nao apliquei (evita crash).",
+                               target);
+                } else {
+                    uint64_t a[2] = { (uint64_t)tped, 1 };
+                    CN("SET_ENTITY_INVINCIBLE", a, 2);
+                    uint64_t pr[9] = { (uint64_t)tped, 1,1,1,1,1,1,1,1 };
+                    CN("SET_ENTITY_PROOFS", pr, 9);
+                    uint64_t rg[2] = { (uint64_t)tped, 0 };
+                    CN("SET_PED_CAN_RAGDOLL", rg, 2);
+                    Log::Write("God dado no id %d (controle ok — efetivo).", target);
+                }
+            }
+        }
+
+        // ---- ressuscitar (evento de paramedico — server-side de verdade) ----
+        if (g_PActions.reviveId >= 0) {
+            int target = g_PActions.reviveId;
+            g_PActions.reviveId = -1;
+            int srv = PlayerServerId(target);
+            int tped = Natives::GetPlayerPed(target);
+            if (!tped) {
+                Log::Write("Revive: id %d sem ped (offline?).", target);
+            } else {
+                // mesmo fluxo do trabalho de medico: dispara o evento de
+                // reanimar pro server, que e quem valida e revive de verdade
+                if (srv > 0) {
+                    static const char* kReviveEvents[] = {
+                        "esx_ambulancejob:revive",   // ESX classico
+                        "qb-ambulancejob:revive",    // QBCore
+                        "osp_ambulance:revive",      // OSP
+                        "wasabi_ambulance:revive",   // Wasabi
+                        "paramedico:reanimar",       // vRP BR
+                        "hospital:reanimar",         // hospital BR
+                        "vrp:reanimar",              // vRP BR generico
+                    };
+                    for (const char* ev : kReviveEvents) {
+                        MsgPack m; m.BeginArray(1); m.Int(srv);
+                        TriggerServer(ev, m);
+                    }
+                    Log::Write("Revive: %d eventos de medico disparados pro srvId %d.",
+                               (int)(sizeof(kReviveEvents)/sizeof(kReviveEvents[0])), srv);
+                }
+                // CPR cosmetica no nosso ped (igual o medico faz)
+                uint64_t rd[2] = { (uint64_t)"mini@cpr@char_a@cpr_str", 0 };
+                CN("REQUEST_ANIM_DICT", rd, 2);
+                uint64_t ta[10] = {
+                    (uint64_t)ped, (uint64_t)"mini@cpr@char_a@cpr_str",
+                    (uint64_t)"cpr_pumpchest",
+                    FA(8.f), FA(-8.f), (uint64_t)-1, 0, 0, 0, 0 };
+                CN("TASK_PLAY_ANIM", ta, 10);
+                // se o server der controle do ped caido, fallback local seguro
+                if (MechHasControl(tped)) {
+                    Vec3 p = Natives::GetEntityCoords(tped);
+                    uint64_t a[7] = { (uint64_t)tped,
+                                      FA(p.x), FA(p.y), FA(p.z), FA(0.f), 0, 0 };
+                    CN("RESURRECT_PED", a, 7);
+                    uint64_t h[2] = { (uint64_t)tped, 200 };
+                    CN("SET_ENTITY_HEALTH", h, 2);
+                    uint64_t c[1] = { (uint64_t)tped };
+                    CN("CLEAR_PED_TASKS_IMMEDIATELY", c, 1);
+                    Log::Write("Revive no id %d: aplicado com controle.", target);
+                } else {
+                    Log::Write("Revive no id %d: sem controle — so os eventos de server.",
+                               target);
+                }
             }
         }
 
@@ -1478,7 +1552,14 @@ namespace C4pt0r::Features
                 Log::Write("Grab: alvo sumiu.");
             } else {
                 bool ctrl = MechHasControl(s_GrabPed);
-                if (ctrl || ++s_GrabTries > 40) {
+                if (!ctrl && ++s_GrabTries > 40) {
+                    // attach local em ped remoto SEM controle = crash
+                    // assincrono do jogo (confirmado no dump). Nao faz.
+                    s_GrabPed = 0;
+                    Log::Write("Grab: server nao deu controle — cancelado. "
+                               "Os eventos de carry ja foram disparados; "
+                               "se a cidade tiver o resource, ele assume.");
+                } else if (ctrl) {
                     int bone = 0;
                     uint64_t ba[2] = { (uint64_t)ped, 40269 };   // SKEL_Spine3
                     uint64_t br[4] = {};
@@ -1492,15 +1573,12 @@ namespace C4pt0r::Features
                     if (CN("ATTACH_ENTITY_TO_ENTITY", at, 15)) {
                         s_GrabAttached = s_GrabPed;
                         g_PActions.grabActive = true;
-                        // nossa animacao de carregar (cosmetica — a do
-                        // alvo roda no cliente dele via evento de server)
                         uint64_t ta[10] = {
                             (uint64_t)ped, (uint64_t)"missfinale_c2mcs_1",
                             (uint64_t)"fin_c2_mcs_1_camman",
                             FA(8.f), FA(-8.f), (uint64_t)-1, 49, 0, 0, 0 };
                         CN("TASK_PLAY_ANIM", ta, 10);
-                        Log::Write(ctrl ? "Grab: carregando (controle ok — efetivo)."
-                                        : "Grab: carregando SO LOCAL — server nao deu controle.");
+                        Log::Write("Grab: carregando (controle ok — efetivo).");
                     } else {
                         Log::Write("Grab: attach falhou.");
                     }
