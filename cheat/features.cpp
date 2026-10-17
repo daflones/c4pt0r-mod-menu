@@ -31,6 +31,7 @@ namespace C4pt0r::Features
     static uint64_t FA(float f);   // fwd — definida junto do CN() mais abaixo
     static bool CN(const char* n, const uint64_t* a = nullptr, int c = 0,
                    uint64_t* r = nullptr);
+    static void GrabDetach();      // fwd — definida no TickPlayerActions
 
     // ====================================================================
     //  Tick — called from main thread, safe to use natives
@@ -718,6 +719,7 @@ namespace C4pt0r::Features
         s_WasNoclip = false;
         s_PStage = PStage::Idle;
         s_PigLeft = 0;
+        __try { GrabDetach(); } __except (EXCEPTION_EXECUTE_HANDLER) {}
         Log::Write("RestoreAll: estado do ped restaurado.");
     }
 
@@ -1306,6 +1308,116 @@ namespace C4pt0r::Features
         }
     }
 
+    // ---- Acoes em outros jogadores: dar god / agarrar --------------------
+    //  O ped de outro player pertence ao cliente dele — se o server nao
+    //  ceder controle, o efeito fica so local (voce ve, o server nao). A
+    //  gente pede controle por ~40 ticks; sem resposta, aplica assim mesmo
+    //  e avisa no log.
+    static int  s_GrabPed      = 0;    // alvo esperando controle
+    static int  s_GrabAttached = 0;    // alvo ja carregado no ombro
+    static int  s_GrabTries    = 0;
+
+    static void GrabDetach()
+    {
+        if (s_GrabAttached) {
+            uint64_t a[3] = { (uint64_t)s_GrabAttached, 1, 1 };
+            CN("DETACH_ENTITY", a, 3);
+        }
+        s_GrabPed = s_GrabAttached = 0;
+        g_PActions.grabActive = false;
+    }
+
+    static void TickPlayerActions()
+    {
+        int ped = Natives::PlayerPedId();
+        if (!ped) { if (s_GrabPed || s_GrabAttached) GrabDetach(); return; }
+
+        // ---- dar god ----
+        if (g_PActions.giveGodId >= 0) {
+            int target = g_PActions.giveGodId;
+            g_PActions.giveGodId = -1;
+            int tped = Natives::GetPlayerPed(target);
+            if (!tped) {
+                Log::Write("God: id %d sem ped (offline?).", target);
+            } else {
+                bool ctrl = MechHasControl(tped);   // pede controle tambem
+                uint64_t a[2] = { (uint64_t)tped, 1 };
+                CN("SET_ENTITY_INVINCIBLE", a, 2);
+                uint64_t pr[9] = { (uint64_t)tped, 1,1,1,1,1,1,1,1 };
+                CN("SET_ENTITY_PROOFS", pr, 9);
+                uint64_t rg[2] = { (uint64_t)tped, 0 };
+                CN("SET_PED_CAN_RAGDOLL", rg, 2);
+                Log::Write(ctrl ? "God dado no id %d (controle ok — efetivo)."
+                                : "God no id %d — SEM controle do ped, efeito so local.",
+                           target);
+            }
+        }
+
+        // ---- soltar ----
+        if (g_PActions.releaseGrab) {
+            g_PActions.releaseGrab = false;
+            GrabDetach();
+            Log::Write("Grab: soltou.");
+        }
+
+        // ---- comecar a carregar ----
+        if (g_PActions.grabId >= 0) {
+            int target = g_PActions.grabId;
+            g_PActions.grabId = -1;
+            GrabDetach();
+            int tped = Natives::GetPlayerPed(target);
+            if (!tped) {
+                Log::Write("Grab: id %d sem ped (offline?).", target);
+            } else {
+                s_GrabPed = tped;
+                s_GrabTries = 0;
+            }
+        }
+
+        // ---- esperando controle -> attach no ombro ----
+        if (s_GrabPed) {
+            uint64_t e[1] = { (uint64_t)s_GrabPed };
+            uint64_t er[4] = {};
+            if (!CN("DOES_ENTITY_EXIST", e, 1, er) || !er[0]) {
+                s_GrabPed = 0;
+                Log::Write("Grab: alvo sumiu.");
+            } else {
+                bool ctrl = MechHasControl(s_GrabPed);
+                if (ctrl || ++s_GrabTries > 40) {
+                    int bone = 0;
+                    uint64_t ba[2] = { (uint64_t)ped, 40269 };   // SKEL_Spine3
+                    uint64_t br[4] = {};
+                    if (CN("GET_PED_BONE_INDEX", ba, 2, br)) bone = (int)br[0];
+                    uint64_t at[15] = {
+                        (uint64_t)s_GrabPed, (uint64_t)ped, (uint64_t)bone,
+                        FA(0.27f), FA(0.15f), FA(0.63f),   // posicao no ombro
+                        FA(0.5f),  FA(0.5f),  FA(0.0f),    // rotacao deitado
+                        0, 0, 0, 1, 2, 0
+                    };
+                    if (CN("ATTACH_ENTITY_TO_ENTITY", at, 15)) {
+                        s_GrabAttached = s_GrabPed;
+                        g_PActions.grabActive = true;
+                        Log::Write(ctrl ? "Grab: carregando (controle ok — efetivo)."
+                                        : "Grab: carregando SO LOCAL — server nao deu controle.");
+                    } else {
+                        Log::Write("Grab: attach falhou.");
+                    }
+                    s_GrabPed = 0;
+                }
+            }
+        }
+
+        // ---- alvo carregado sumiu? limpa estado ----
+        if (s_GrabAttached) {
+            uint64_t e[1] = { (uint64_t)s_GrabAttached };
+            uint64_t er[4] = {};
+            if (!CN("DOES_ENTITY_EXIST", e, 1, er) || !er[0]) {
+                s_GrabAttached = 0;
+                g_PActions.grabActive = false;
+            }
+        }
+    }
+
     // ---- Main tick (called from cheat thread) ---------------------------
     void Tick()
     {
@@ -1338,6 +1450,7 @@ namespace C4pt0r::Features
         Natives::g_TickStage = 13; TickFarm();
         Natives::g_TickStage = 14; TickMechanic();
         Natives::g_TickStage = 15; TickWeapons();
+        Natives::g_TickStage = 16; TickPlayerActions();
         Natives::g_TickStage = 0;
     }
 

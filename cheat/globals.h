@@ -204,6 +204,18 @@ namespace C4pt0r
         float torqueMult = 0.f;
     };
 
+    // ------------------------------------ Acoes em OUTROS jogadores
+    //  No FiveM cada cliente e dono do proprio ped — dar god ou agarrar
+    //  alguem so tem efeito real se o server ceder controle da entidade.
+    //  Sem controle vira efeito local (so voce ve). O cheat pede controle
+    //  antes e loga o resultado.
+    struct PlayerActionsConfig {
+        int   giveGodId    = -1;     // one-shot: dar god nesse player id
+        int   grabId       = -1;     // one-shot: comecar a carregar esse id
+        bool  releaseGrab  = false;  // one-shot: soltar quem esta carregado
+        bool  grabActive   = false;  // estado — tem alguem carregado (menu le)
+    };
+
     // ---------------------------------------------- Armas
     struct WeaponConfig {
         bool  give        = false;
@@ -320,6 +332,7 @@ namespace C4pt0r
     inline FunConfig        g_Fun;
     inline MechanicConfig   g_Mech;
     inline WeaponConfig     g_Weapon;
+    inline PlayerActionsConfig g_PActions;
     inline std::vector<GarageEntry> g_Garage;
     inline std::mutex               g_GarageMtx;
     inline int           g_ScreenWidth  = 1920;

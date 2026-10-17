@@ -330,6 +330,19 @@ namespace C4pt0r::Menu
             if (ImGui::Button("TRAZER PRA MIM", ImVec2(-1, 30)))
                 g_Teleport.bringPlayerId = s_SelPlayer;
             Tooltip("Trazer o jogador pra perto de voce (efeito local).");
+
+            if (ImGui::Button("DAR GOD", ImVec2(ImGui::GetContentRegionAvail().x * 0.48f, 30)))
+                g_PActions.giveGodId = s_SelPlayer;
+            Tooltip("Deixa o jogador selecionado invencivel (efetivo so se o server der controle).");
+            ImGui::SameLine();
+            if (g_PActions.grabActive) {
+                if (ImGui::Button("SOLTAR PLAYER", ImVec2(-1, 30)))
+                    g_PActions.releaseGrab = true;
+            } else {
+                if (ImGui::Button("AGARRAR/CARREGAR", ImVec2(-1, 30)))
+                    g_PActions.grabId = s_SelPlayer;
+                Tooltip("Carrega o jogador no ombro, igual o H dos empregos.");
+            }
         }
 
         // TP direto por ID digitado — nao precisa selecionar na lista
