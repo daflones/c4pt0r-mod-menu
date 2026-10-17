@@ -1360,10 +1360,21 @@ namespace C4pt0r::Features
 
     static bool TriggerServer(const char* event, const MsgPack& args)
     {
+        // O payload tem que sobreviver a chamada: se o native enfileira a
+        // serializacao pra net thread ler depois, um buffer de stack vira
+        // ponteiro pendurado -> net thread le lixo -> call p/ endereco
+        // corrompido (crash DEP no exe). Vaza ~bytes por evento, trivial.
+        size_t n = args.b.size();
+        uint8_t* blob = new uint8_t[n + 1];
+        memcpy(blob, args.b.data(), n);
+        blob[n] = 0;
+        Log::Step("TriggerServer '%s' payload=%zu bytes", event, n);
         uint64_t a[3] = { (uint64_t)event,
-                          (uint64_t)args.b.data(),
-                          (uint64_t)args.b.size() };
-        return CN("TRIGGER_SERVER_EVENT_INTERNAL", a, 3);
+                          (uint64_t)blob,
+                          (uint64_t)n };
+        bool ok = CN("TRIGGER_SERVER_EVENT_INTERNAL", a, 3);
+        Log::Step("TriggerServer '%s' retornou %d", event, ok ? 1 : 0);
+        return ok;
     }
 
     // server id do alvo (o que os eventos de server esperam, nao o idx local)
@@ -1447,10 +1458,13 @@ namespace C4pt0r::Features
                 // SEM controle nao toca no ped remoto — mutar estado de
                 // ped de outro player sem ownership corrompe o sync e
                 // crasha o jogo ~segundos depois (crash nos dumps).
+                Log::Step("God id=%d check controle", target);
                 if (!MechHasControl(tped)) {
+                    Log::Step("God id=%d sem controle — abort", target);
                     Log::Write("God no id %d: SEM controle — nao apliquei (evita crash).",
                                target);
                 } else {
+                    Log::Step("God id=%d aplicando", target);
                     uint64_t a[2] = { (uint64_t)tped, 1 };
                     CN("SET_ENTITY_INVINCIBLE", a, 2);
                     uint64_t pr[9] = { (uint64_t)tped, 1,1,1,1,1,1,1,1 };
@@ -1462,34 +1476,33 @@ namespace C4pt0r::Features
             }
         }
 
-        // ---- ressuscitar (evento de paramedico — server-side de verdade) ----
+        // ---- ressuscitar: eventos de paramedico, 1 por tick --------------
+        // Disparar os 7 de uma vez impede saber qual crashou — a fila roda
+        // um por tick com Step() sincrono antes de cada disparo.
+        static int s_ReviveSrv   = -1;
+        static int s_ReviveEvIdx = 0;
+        static const char* kReviveEvents[] = {
+            "esx_ambulancejob:revive",   // ESX classico
+            "qb-ambulancejob:revive",    // QBCore
+            "osp_ambulance:revive",      // OSP
+            "wasabi_ambulance:revive",   // Wasabi
+            "paramedico:reanimar",       // vRP BR
+            "hospital:reanimar",         // hospital BR
+            "vrp:reanimar",              // vRP BR generico
+        };
+
         if (g_PActions.reviveId >= 0) {
             int target = g_PActions.reviveId;
             g_PActions.reviveId = -1;
+            Log::Step("Revive iniciado id=%d", target);
             int srv = PlayerServerId(target);
             int tped = Natives::GetPlayerPed(target);
+            Log::Step("Revive srvId=%d tped=%d", srv, tped);
             if (!tped) {
                 Log::Write("Revive: id %d sem ped (offline?).", target);
             } else {
-                // mesmo fluxo do trabalho de medico: dispara o evento de
-                // reanimar pro server, que e quem valida e revive de verdade
-                if (srv > 0) {
-                    static const char* kReviveEvents[] = {
-                        "esx_ambulancejob:revive",   // ESX classico
-                        "qb-ambulancejob:revive",    // QBCore
-                        "osp_ambulance:revive",      // OSP
-                        "wasabi_ambulance:revive",   // Wasabi
-                        "paramedico:reanimar",       // vRP BR
-                        "hospital:reanimar",         // hospital BR
-                        "vrp:reanimar",              // vRP BR generico
-                    };
-                    for (const char* ev : kReviveEvents) {
-                        MsgPack m; m.BeginArray(1); m.Int(srv);
-                        TriggerServer(ev, m);
-                    }
-                    Log::Write("Revive: %d eventos de medico disparados pro srvId %d.",
-                               (int)(sizeof(kReviveEvents)/sizeof(kReviveEvents[0])), srv);
-                }
+                if (srv > 0) { s_ReviveSrv = srv; s_ReviveEvIdx = 0; }
+                else Log::Write("Revive: sem server id — so o local.");
                 // CPR cosmetica no nosso ped (igual o medico faz)
                 uint64_t rd[2] = { (uint64_t)"mini@cpr@char_a@cpr_str", 0 };
                 CN("REQUEST_ANIM_DICT", rd, 2);
@@ -1498,8 +1511,11 @@ namespace C4pt0r::Features
                     (uint64_t)"cpr_pumpchest",
                     FA(8.f), FA(-8.f), (uint64_t)-1, 0, 0, 0, 0 };
                 CN("TASK_PLAY_ANIM", ta, 10);
+                Log::Step("Revive anim ok");
                 // se o server der controle do ped caido, fallback local seguro
+                Log::Step("Revive check controle");
                 if (MechHasControl(tped)) {
+                    Log::Step("Revive aplicando RESURRECT_PED");
                     Vec3 p = Natives::GetEntityCoords(tped);
                     uint64_t a[7] = { (uint64_t)tped,
                                       FA(p.x), FA(p.y), FA(p.z), FA(0.f), 0, 0 };
@@ -1510,9 +1526,22 @@ namespace C4pt0r::Features
                     CN("CLEAR_PED_TASKS_IMMEDIATELY", c, 1);
                     Log::Write("Revive no id %d: aplicado com controle.", target);
                 } else {
+                    Log::Step("Revive sem controle — fim");
                     Log::Write("Revive no id %d: sem controle — so os eventos de server.",
                                target);
                 }
+            }
+        }
+
+        // fila: 1 evento de revive por tick
+        if (s_ReviveSrv > 0) {
+            MsgPack m; m.BeginArray(1); m.Int(s_ReviveSrv);
+            TriggerServer(kReviveEvents[s_ReviveEvIdx], m);
+            if (++s_ReviveEvIdx >=
+                    (int)(sizeof(kReviveEvents) / sizeof(kReviveEvents[0]))) {
+                Log::Write("Revive: eventos de medico disparados pro srvId %d.",
+                           s_ReviveSrv);
+                s_ReviveSrv = -1;
             }
         }
 

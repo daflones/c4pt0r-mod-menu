@@ -78,6 +78,31 @@ namespace C4pt0r::Log
         g_Busy = false;
     }
 
+    // Write SINCRONO (append via handle novo + WriteFile bloqueante).
+    // So pra etapas antes de codigo perigoso: garante que a linha chega
+    // no disco mesmo se o processo morrer no proximo native call.
+    inline void Step(const char* fmt, ...) {
+        char buf[1024];
+        va_list args;
+        va_start(args, fmt);
+        vsnprintf(buf, sizeof(buf), fmt, args);
+        va_end(args);
+        SYSTEMTIME st;
+        GetLocalTime(&st);
+        char line[1200];
+        int n = snprintf(line, sizeof(line), "[%02d:%02d:%02d] STEP %s\r\n",
+                         st.wHour, st.wMinute, st.wSecond, buf);
+        if (g_Path[0] == 0 || n <= 0) return;
+        HANDLE h = CreateFileA(g_Path, FILE_APPEND_DATA,
+            FILE_SHARE_READ | FILE_SHARE_DELETE, nullptr, OPEN_ALWAYS,
+            FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (h == INVALID_HANDLE_VALUE) return;
+        DWORD w = 0;
+        WriteFile(h, line, n, &w, nullptr);
+        FlushFileBuffers(h);
+        CloseHandle(h);
+    }
+
     inline void Close() {
         Write("=== Log closed ===");
         if (g_File != INVALID_HANDLE_VALUE) {

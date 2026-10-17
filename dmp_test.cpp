@@ -36,7 +36,7 @@ int main(int argc, char** argv) {
         const uint8_t* mp = p + modRva + 4;
         for (uint32_t i = 0; i < nmod && ok(mp, 108); ++i) {
             Mod m; m.base = *(uint64_t*)mp; m.size = *(uint32_t*)(mp + 8);
-            uint32_t nRva = *(uint32_t*)(mp + 24);
+            uint32_t nRva = *(uint32_t*)(mp + 20);
             if (ok(p + nRva, 4)) {
                 uint32_t nlen = *(uint32_t*)(p + nRva);
                 if (ok(p + nRva + 4, nlen) && nlen < 4096)
@@ -59,8 +59,12 @@ int main(int argc, char** argv) {
     uint32_t code = *(uint32_t*)(ep + 8);
     uint64_t eaddr = *(uint64_t*)(ep + 24);
     uint32_t ctxRva = *(uint32_t*)(ep + 164);
-    printf("code=0x%08X addr=0x%llX ctxRva=0x%X\n", code,
-           (unsigned long long)eaddr, ctxRva);
+    uint32_t nparams = *(uint32_t*)(ep + 32);
+    printf("code=0x%08X addr=0x%llX ctxRva=0x%X nparams=%u\n", code,
+           (unsigned long long)eaddr, ctxRva, nparams);
+    for (uint32_t i = 0; i < nparams && i < 4; ++i)
+        printf("  param%u = 0x%llX\n", i,
+               (unsigned long long)*(uint64_t*)(ep + 40 + i * 8));
     if (!ok(p + ctxRva, 0x100)) { printf("bad ctx\n"); return 1; }
     const uint8_t* ctx = p + ctxRva;
     uint64_t rip = *(uint64_t*)(ctx + 0xF8);
