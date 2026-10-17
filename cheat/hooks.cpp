@@ -164,6 +164,10 @@ namespace C4pt0r::Hooks
 
         // ---- Render frame with SEH protection ----
         __try {
+            // O tick do cheat roda na thread de render do JOGO — o adhesive
+            // suspende threads estrangeiras, mas suspender essa congelaria
+            // o jogo inteiro. Features nunca mais "morrem do nada".
+            Features::FrameTick();
             FeedImGuiInput();
 
             ImGui_ImplDX11_NewFrame();

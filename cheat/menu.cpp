@@ -332,6 +332,15 @@ namespace C4pt0r::Menu
             Tooltip("Trazer o jogador pra perto de voce (efeito local).");
         }
 
+        // TP direto por ID digitado — nao precisa selecionar na lista
+        static int s_IdInput = 0;
+        ImGui::SetNextItemWidth(-70);
+        ImGui::InputInt("ID do jogador##tpid", &s_IdInput);
+        ImGui::SameLine();
+        if (ImGui::Button("IR##tpidbtn", ImVec2(-1, 0)) && s_IdInput >= 0)
+            g_Teleport.toPlayerId = s_IdInput;
+        Tooltip("Digita o ID do jogador e teleporta direto ate ele.");
+
         // ---- Vehicles ----
         SectionHeader("SPAWN DE VEICULO");
 

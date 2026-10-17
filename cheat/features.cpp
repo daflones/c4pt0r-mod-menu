@@ -282,12 +282,13 @@ namespace C4pt0r::Features
             }
         }
 
-        // TP to waypoint — GET_WAYPOINT_COORDS direct first, blip walk fallback
+        // TP to waypoint — blip PRIMEIRO (e o marcador que o jogador
+        // realmente pos no mapa); GET_WAYPOINT_COORDS direto so fallback
         if (g_Teleport.toWaypoint) {
             g_Teleport.toWaypoint = false;
-            Vec3 wp = Natives::GetWaypointCoordsDirect();
-            if (wp.x == 0.f && wp.y == 0.f && Natives::IsWaypointActive())
-                wp = Natives::GetWaypointCoords();
+            Vec3 wp = Natives::GetWaypointCoords();
+            if (wp.x == 0.f && wp.y == 0.f)
+                wp = Natives::GetWaypointCoordsDirect();
             if (wp.x != 0.f || wp.y != 0.f) {
                 BeginTeleport(ped, wp.x, wp.y, wp.z);
             } else {
@@ -1296,6 +1297,104 @@ namespace C4pt0r::Features
         Natives::g_TickStage = 14; TickMechanic();
         Natives::g_TickStage = 15; TickWeapons();
         Natives::g_TickStage = 0;
+    }
+
+    // ====================================================================
+    //  FrameTick — o driver do cheat, chamado pelo hook do Present.
+    //
+    //  O FiveM/adhesive SUSPENDE threads estrangeiras — a feature thread
+    //  congelava no meio de um sleep (stage 94 com beat velho) e nada
+    //  revivia, porque nem o supervisor podia rodar. A thread de render
+    //  do jogo NUNCA e suspensa (senao o jogo congela junto) — entao o
+    //  tick roda nela. A feature thread continua existindo como backup:
+    //  se o Present parar, ela assume (o gate atomico garante um driver
+    //  so). Contem o watchdog de natives + recovery tambem.
+    // ====================================================================
+    void FrameTick()
+    {
+        static std::atomic<int64_t> s_LastTick{0};
+        static std::atomic<bool>    s_InTick{false};
+        static bool nativesOk = true;
+        static int  consecutiveErrors = 0;
+        static int  recoveryWait = 0;
+        static int  watchTicks = 0;
+        static int  deadPings  = 0;
+
+        int64_t now = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now().time_since_epoch()).count();
+        int64_t prev = s_LastTick.load();
+        if (now - prev < 12) return;
+        if (!s_LastTick.compare_exchange_strong(prev, now)) return;
+        if (s_InTick.exchange(true)) return;      // outro driver no tick
+
+        Natives::g_TickStage = 91;
+        Natives::g_TickBeat  = now;
+
+        if (nativesOk) {
+            Natives::g_TickStage = 92;
+            __try {
+                Tick();
+                consecutiveErrors = 0;
+            }
+            __except (EXCEPTION_EXECUTE_HANDLER) {
+                ++consecutiveErrors;
+                Log::Write("EXCEPTION in Features::Tick(), code 0x%08X (#%d)",
+                           GetExceptionCode(), consecutiveErrors);
+                if (consecutiveErrors >= 25) {
+                    nativesOk = false;
+                    recoveryWait = 0;
+                    consecutiveErrors = 0;
+                    Natives::MarkUnhealthy();
+                    Log::Write("Features pausadas por excecoes — restaurando ped e agendando re-init.");
+                    Natives::g_TickStage = 97;
+                    __try { RestoreEntity(); }
+                    __except (EXCEPTION_EXECUTE_HANDLER) {}
+                }
+            }
+
+            // watchdog: natives morrem SEM excecao tambem — pinga ~2s;
+            // 2 falhas = re-init (o proprio driver resolve agora)
+            Natives::g_TickStage = 93;
+            if (++watchTicks >= 120) {
+                watchTicks = 0;
+                bool alive = false;
+                __try { alive = Natives::Ping(); }
+                __except (EXCEPTION_EXECUTE_HANDLER) { alive = false; }
+                if (!alive) {
+                    if (++deadPings >= 2) {
+                        deadPings = 0;
+                        nativesOk = false;
+                        recoveryWait = 0;
+                        Natives::MarkUnhealthy();
+                        Log::Write("Watchdog: natives pararam de responder — re-init agendado.");
+                        Natives::g_TickStage = 97;
+                        __try { RestoreEntity(); }
+                        __except (EXCEPTION_EXECUTE_HANDLER) {}
+                    }
+                } else {
+                    deadPings = 0;
+                }
+            }
+        } else {
+            Natives::g_TickStage = 95;
+            if (++recoveryWait >= 300) {   // ~5s
+                recoveryWait = 0;
+                Log::Write("Tentando re-inicializar natives...");
+                Natives::g_TickStage = 96;
+                __try {
+                    if (Natives::ReInitialize()) {
+                        nativesOk = true;
+                        Log::Write("Natives recuperados — features reativadas.");
+                    }
+                }
+                __except (EXCEPTION_EXECUTE_HANDLER) {
+                    Log::Write("Re-init threw (0x%08X), tentando de novo depois.",
+                               GetExceptionCode());
+                }
+            }
+        }
+
+        s_InTick = false;
     }
 
     // ====================================================================

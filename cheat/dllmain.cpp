@@ -105,88 +105,14 @@ static void FeatureLoop()
     const uint64_t myGen = s_FeatureGen.load();
     Log::Write("Feature thread iniciada (gen %llu, threads=%d)",
                (unsigned long long)myGen, s_FeatureThreads.load());
-    bool nativesOk = Natives::IsReady();
-    int consecutiveErrors = 0;
-    int recoveryWait = 0;
-    int watchTicks = 0;
-    int deadPings  = 0;
-    Natives::g_TickStage = 90;
 
+    // Backup driver: o tick roda mesmo na thread de render (Present) —
+    // o adhesive suspende threads estrangeiras, nao a do jogo. Essa
+    // thread so dirige se o Present parar (hook caiu, jogo suspenso);
+    // o gate atomico do FrameTick garante um driver so.
     while (g_Running && s_FeatureGen.load() == myGen) {
-        Natives::g_TickStage = 91;
-        Natives::g_TickBeat = NowMs();
-        if (nativesOk) {
-            Natives::g_TickStage = 92;
-            __try {
-                Features::Tick();
-                consecutiveErrors = 0;
-            }
-            __except (EXCEPTION_EXECUTE_HANDLER) {
-                ++consecutiveErrors;
-                Log::Write("EXCEPTION in Features::Tick(), code 0x%08X (#%d)",
-                           GetExceptionCode(), consecutiveErrors);
-                if (consecutiveErrors >= 25) {
-                    // NAO mata as features pra sempre — restaura o ped
-                    // (evita ficar invisivel/sem colisao) e tenta re-
-                    // inicializar os natives sozinho a cada ~5s.
-                    nativesOk = false;
-                    recoveryWait = 0;
-                    consecutiveErrors = 0;
-                    Natives::MarkUnhealthy();
-                    Log::Write("Features pausadas por excecoes — restaurando ped e agendando re-init.");
-                    Natives::g_TickStage = 97;
-                    __try { Features::RestoreEntity(); }   // mantem toggles do user
-                    __except (EXCEPTION_EXECUTE_HANDLER) {}
-                }
-            }
-
-            // Watchdog: natives tambem morrem SEM jogar excecao (CallNative
-            // retorna false, todos os paths falham). Nesse caso o tick roda
-            // mas nada acontece — era o "menu fantasma". Pinga um nativo
-            // seguro a cada ~2s; 2 falhas = declara morto e re-inicializa.
-            Natives::g_TickStage = 93;
-            if (++watchTicks >= 120) {   // 120 x 16ms ~= 2s
-                watchTicks = 0;
-                bool alive = false;
-                __try { alive = Natives::Ping(); }
-                __except (EXCEPTION_EXECUTE_HANDLER) { alive = false; }
-                if (!alive) {
-                    if (++deadPings >= 2) {
-                        deadPings = 0;
-                        nativesOk = false;
-                        recoveryWait = 0;
-                        Natives::MarkUnhealthy();
-                        Log::Write("Watchdog: natives pararam de responder "
-                                   "sem excecao — re-init agendado.");
-                        Natives::g_TickStage = 97;
-                        __try { Features::RestoreEntity(); }
-                        __except (EXCEPTION_EXECUTE_HANDLER) {}
-                    }
-                } else {
-                    deadPings = 0;
-                }
-            }
-        } else {
-            // auto-recovery: re-resolve + re-probe periodically
-            Natives::g_TickStage = 95;
-            if (++recoveryWait >= 312) {   // ~5s em passos de 16ms
-                recoveryWait = 0;
-                Log::Write("Tentando re-inicializar natives...");
-                Natives::g_TickStage = 96;
-                __try {
-                    if (Natives::ReInitialize()) {
-                        nativesOk = true;
-                        Log::Write("Natives recuperados — features reativadas.");
-                    }
-                }
-                __except (EXCEPTION_EXECUTE_HANDLER) {
-                    Log::Write("Re-init threw (0x%08X), tentando de novo depois.",
-                               GetExceptionCode());
-                }
-            }
-        }
-        Natives::g_TickStage = 94;
-        std::this_thread::sleep_for(std::chrono::milliseconds(16));
+        Features::FrameTick();
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
     }
     Natives::g_TickStage = 99;
     --s_FeatureThreads;

@@ -450,14 +450,34 @@ namespace C4pt0r::Natives
     }
 
     // ---- Vec3-returning natives ------------------------------------------
+    //  Convencao FiveM: natives que retornam Vector3 recebem um Vector3*
+    //  como ULTIMO arg — o handler escreve o vetor la, nao no returnValue.
+    //  Sem o out-ptr ele escreve num slot de arg lixo = 12-24 bytes num
+    //  endereco aleatorio. Era a corrupcao que crashava o jogo depois de
+    //  "um tempo usando" (GetEntityCoords roda ~60x/s por todas as feats).
+    //  O decode "y sempre 0, z estranho" era o ret[] lendo lixo.
+    static Vec3 CallVec3(uint64_t hash, const uint64_t* args, int nargs)
+    {
+        alignas(16) float vec[8] = {};   // cobre packed E scrVector3 padded
+        uint64_t a[12] = {};
+        for (int i = 0; i < nargs && i < 11; ++i) a[i] = args[i];
+        a[nargs] = reinterpret_cast<uint64_t>(vec);
+        uint64_t ret[4] = {};
+        if (!CallNative(hash, a, nargs + 1, ret)) {
+            LogMissingHash(hash);
+            return {};
+        }
+        // scrVector3 padded = {x,_,y,_,z,_}: pads sao sempre 0.
+        if (vec[1] == 0.f && vec[3] == 0.f && (vec[2] != 0.f || vec[4] != 0.f))
+            return Vec3(vec[0], vec[2], vec[4]);
+        return Vec3(vec[0], vec[1], vec[2]);   // packed {x,y,z}
+    }
+
     Vec3 InvokeVec3(uint64_t hash, uint64_t arg0, uint64_t arg1, int explicitN)
     {
-        uint64_t args[2] = { arg0, arg1 };
         int n = (explicitN >= 0) ? explicitN : (arg0 ? (arg1 ? 2 : 1) : 0);
-        uint64_t ret[4] = {};
-        if (!CallNative(hash, args, n, ret)) { LogMissingHash(hash); return {}; }
-        auto* r = reinterpret_cast<float*>(ret);
-        return Vec3(r[0], r[1], r[2]);
+        uint64_t args[3] = { arg0, arg1, 0 };
+        return CallVec3(hash, args, n);
     }
 
     // ====================================================================
@@ -587,10 +607,7 @@ namespace C4pt0r::Natives
         *reinterpret_cast<int*>(&a[0]) = ped;
         *reinterpret_cast<int*>(&a[1]) = boneId;
         a[2] = a[3] = a[4] = 0;   // offset xyz floats
-        uint64_t ret[4] = {};
-        if (!CallNative(Hash::GET_PED_BONE_COORDS, a, 5, ret)) return {};
-        auto* r = reinterpret_cast<float*>(ret);
-        return Vec3(r[0], r[1], r[2]);
+        return CallVec3(Hash::GET_PED_BONE_COORDS, a, 5);
     }
     int GetPedArmour(int ped) {
         uint64_t a[] = { static_cast<uint64_t>(ped) };
@@ -611,16 +628,10 @@ namespace C4pt0r::Natives
     // Camera ---
     Vec3 GetGameplayCamRot(int order) {
         uint64_t a[] = { static_cast<uint64_t>(order) };
-        uint64_t ret[4] = {};
-        if (!CallNative(Hash::GET_GAMEPLAY_CAM_ROT, a, 1, ret)) return {};
-        auto* r = reinterpret_cast<float*>(ret);
-        return Vec3(r[0], r[1], r[2]);
+        return CallVec3(Hash::GET_GAMEPLAY_CAM_ROT, a, 1);
     }
     Vec3 GetGameplayCamCoord() {
-        uint64_t ret[4] = {};
-        if (!CallNative(Hash::GET_GAMEPLAY_CAM_COORD, nullptr, 0, ret)) return {};
-        auto* r = reinterpret_cast<float*>(ret);
-        return Vec3(r[0], r[1], r[2]);
+        return CallVec3(Hash::GET_GAMEPLAY_CAM_COORD, nullptr, 0);
     }
     float GetGameplayCamRelativePitch() {
         uint64_t ret[4] = {};
@@ -753,17 +764,11 @@ namespace C4pt0r::Natives
         CallNative(Hash::DOES_BLIP_EXIST, a2, 1, ret2);
         if (!ret2[0]) return {};
         uint64_t a3[] = { static_cast<uint64_t>(blip) };
-        uint64_t ret3[4] = {};
-        if (!CallNative(Hash::GET_BLIP_INFO_ID_COORD, a3, 1, ret3)) return {};
-        auto* r = reinterpret_cast<float*>(ret3);
-        return Vec3(r[0], r[1], r[2]);
+        return CallVec3(Hash::GET_BLIP_INFO_ID_COORD, a3, 1);
     }
 
     Vec3 GetWaypointCoordsDirect() {
-        uint64_t ret[4] = {};
-        if (!CallNative(Hash::GET_WAYPOINT_COORDS, nullptr, 0, ret)) return {};
-        auto* r = reinterpret_cast<float*>(ret);
-        return Vec3(r[0], r[1], r[2]);
+        return CallVec3(Hash::GET_WAYPOINT_COORDS, nullptr, 0);
     }
 
     // ---- Ground -------------------------------------------------------------

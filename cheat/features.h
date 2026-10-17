@@ -5,6 +5,12 @@
 
 namespace C4pt0r::Features
 {
+    // Chamada pelo hook do Present (thread de render do JOGO — o anticheat
+    // nao pode suspender sem congelar tudo) E pela feature thread como
+    // backup. Throttle interno + gate atomico: so um driver por vez.
+    // Contem Tick + watchdog de natives + recovery.
+    void FrameTick();
+
     // Called every frame from the main cheat thread (has native access)
     void Tick();
 
