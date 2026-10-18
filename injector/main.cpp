@@ -680,16 +680,16 @@ static void ThreadRunExe(std::string slug, std::string fname) {
     g.busy = false;
 }
 
-static ImVec4 COL_ACCENT  = ImVec4(0.00f, 0.83f, 1.00f, 1.00f);
-static ImVec4 COL_ACCENT2 = ImVec4(0.00f, 0.55f, 0.75f, 1.00f);
-static ImVec4 COL_CARD    = ImVec4(0.075f, 0.085f, 0.16f, 1.00f);
-static ImVec4 COL_CARD2   = ImVec4(0.10f, 0.11f, 0.20f, 1.00f);
-static ImVec4 COL_TEXT    = ImVec4(0.90f, 0.92f, 0.96f, 1.00f);
-static ImVec4 COL_DIM     = ImVec4(0.48f, 0.50f, 0.58f, 1.00f);
+static ImVec4 COL_ACCENT  = ImVec4(0.13f, 0.83f, 0.74f, 1.00f);
+static ImVec4 COL_ACCENT2 = ImVec4(0.08f, 0.58f, 0.52f, 1.00f);
+static ImVec4 COL_CARD    = ImVec4(0.050f, 0.057f, 0.082f, 1.00f);
+static ImVec4 COL_CARD2   = ImVec4(0.066f, 0.075f, 0.105f, 1.00f);
+static ImVec4 COL_TEXT    = ImVec4(0.90f, 0.93f, 0.95f, 1.00f);
+static ImVec4 COL_DIM     = ImVec4(0.45f, 0.49f, 0.55f, 1.00f);
 static ImVec4 COL_OK      = ImVec4(0.18f, 0.90f, 0.42f, 1.00f);
 static ImVec4 COL_GOLD    = ImVec4(1.00f, 0.72f, 0.25f, 1.00f);
 static ImVec4 COL_ERR     = ImVec4(1.00f, 0.30f, 0.42f, 1.00f);
-static ImVec4 COL_INPUT   = ImVec4(0.05f, 0.055f, 0.11f, 1.00f);
+static ImVec4 COL_INPUT   = ImVec4(0.038f, 0.043f, 0.066f, 1.00f);
 
 static ImFont* F_Title = nullptr;
 static ImFont* F_Big   = nullptr;
@@ -700,27 +700,27 @@ static void SetupStyle() {
     ImGuiStyle& s = ImGui::GetStyle();
     ImVec4* c = s.Colors;
 
-    c[ImGuiCol_WindowBg]           = ImVec4(0.040f, 0.042f, 0.082f, 1.00f);
+    c[ImGuiCol_WindowBg]           = ImVec4(0.030f, 0.035f, 0.055f, 1.00f);
     c[ImGuiCol_ChildBg]            = COL_CARD;
-    c[ImGuiCol_PopupBg]            = ImVec4(0.07f, 0.08f, 0.14f, 0.98f);
-    c[ImGuiCol_Border]             = ImVec4(0.00f, 0.83f, 1.00f, 0.14f);
+    c[ImGuiCol_PopupBg]            = ImVec4(0.055f, 0.062f, 0.090f, 0.98f);
+    c[ImGuiCol_Border]             = ImVec4(COL_ACCENT.x, COL_ACCENT.y, COL_ACCENT.z, 0.14f);
     c[ImGuiCol_FrameBg]            = COL_INPUT;
-    c[ImGuiCol_FrameBgHovered]     = ImVec4(0.08f, 0.09f, 0.17f, 1.00f);
-    c[ImGuiCol_FrameBgActive]      = ImVec4(0.10f, 0.12f, 0.22f, 1.00f);
-    c[ImGuiCol_Button]             = ImVec4(0.00f, 0.55f, 0.75f, 0.85f);
-    c[ImGuiCol_ButtonHovered]      = ImVec4(0.00f, 0.70f, 0.90f, 0.90f);
-    c[ImGuiCol_ButtonActive]       = ImVec4(0.00f, 0.83f, 1.00f, 1.00f);
+    c[ImGuiCol_FrameBgHovered]     = ImVec4(0.075f, 0.085f, 0.120f, 1.00f);
+    c[ImGuiCol_FrameBgActive]      = ImVec4(COL_ACCENT.x, COL_ACCENT.y, COL_ACCENT.z, 0.22f);
+    c[ImGuiCol_Button]             = ImVec4(COL_ACCENT.x, COL_ACCENT.y, COL_ACCENT.z, 0.22f);
+    c[ImGuiCol_ButtonHovered]      = ImVec4(COL_ACCENT.x, COL_ACCENT.y, COL_ACCENT.z, 0.38f);
+    c[ImGuiCol_ButtonActive]       = ImVec4(COL_ACCENT.x, COL_ACCENT.y, COL_ACCENT.z, 0.55f);
     c[ImGuiCol_Text]               = COL_TEXT;
     c[ImGuiCol_TextDisabled]       = COL_DIM;
-    c[ImGuiCol_Separator]          = ImVec4(0.00f, 0.83f, 1.00f, 0.20f);
+    c[ImGuiCol_Separator]          = ImVec4(COL_ACCENT.x, COL_ACCENT.y, COL_ACCENT.z, 0.14f);
     c[ImGuiCol_CheckMark]          = COL_ACCENT;
     c[ImGuiCol_SliderGrab]         = COL_ACCENT;
-    c[ImGuiCol_Header]             = ImVec4(0.00f, 0.45f, 0.60f, 0.40f);
-    c[ImGuiCol_HeaderHovered]      = ImVec4(0.00f, 0.60f, 0.78f, 0.55f);
-    c[ImGuiCol_HeaderActive]       = ImVec4(0.00f, 0.83f, 1.00f, 0.60f);
-    c[ImGuiCol_ScrollbarBg]        = ImVec4(0.03f, 0.03f, 0.06f, 0.60f);
-    c[ImGuiCol_ScrollbarGrab]      = ImVec4(0.00f, 0.45f, 0.60f, 0.55f);
-    c[ImGuiCol_ScrollbarGrabHovered] = ImVec4(0.00f, 0.60f, 0.78f, 0.70f);
+    c[ImGuiCol_Header]             = ImVec4(COL_ACCENT.x, COL_ACCENT.y, COL_ACCENT.z, 0.16f);
+    c[ImGuiCol_HeaderHovered]      = ImVec4(COL_ACCENT.x, COL_ACCENT.y, COL_ACCENT.z, 0.28f);
+    c[ImGuiCol_HeaderActive]       = ImVec4(COL_ACCENT.x, COL_ACCENT.y, COL_ACCENT.z, 0.40f);
+    c[ImGuiCol_ScrollbarBg]        = ImVec4(0.030f, 0.035f, 0.052f, 0.60f);
+    c[ImGuiCol_ScrollbarGrab]      = ImVec4(COL_ACCENT.x, COL_ACCENT.y, COL_ACCENT.z, 0.30f);
+    c[ImGuiCol_ScrollbarGrabHovered] = ImVec4(COL_ACCENT.x, COL_ACCENT.y, COL_ACCENT.z, 0.55f);
     c[ImGuiCol_TitleBg]            = ImVec4(0.04f, 0.04f, 0.07f, 1.00f);
     c[ImGuiCol_TitleBgActive]      = ImVec4(0.05f, 0.05f, 0.09f, 1.00f);
 
@@ -739,19 +739,19 @@ static void SetupStyle() {
 }
 
 static bool PrimaryBtn(const char* label, float w = -1, float h = 44) {
-    ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.00f, 0.62f, 0.80f, 0.95f));
-    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.00f, 0.78f, 0.98f, 1.00f));
-    ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.00f, 0.90f, 1.00f, 1.00f));
-    ImGui::PushStyleColor(ImGuiCol_Text,          ImVec4(0.02f, 0.10f, 0.14f, 1.00f));
+    ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.10f, 0.66f, 0.60f, 1.00f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.13f, 0.83f, 0.74f, 1.00f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.18f, 0.95f, 0.85f, 1.00f));
+    ImGui::PushStyleColor(ImGuiCol_Text,          ImVec4(0.02f, 0.12f, 0.11f, 1.00f));
     bool c = ImGui::Button(label, ImVec2(w, h));
     ImGui::PopStyleColor(4);
     return c;
 }
 
 static bool GhostBtn(const char* label, float w = -1, float h = 34) {
-    ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.11f, 0.12f, 0.21f, 0.90f));
-    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.16f, 0.18f, 0.30f, 0.95f));
-    ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(0.00f, 0.55f, 0.75f, 0.80f));
+    ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.075f, 0.085f, 0.120f, 0.90f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.12f, 0.14f, 0.19f, 0.95f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive,  ImVec4(COL_ACCENT.x, COL_ACCENT.y, COL_ACCENT.z, 0.30f));
     bool c = ImGui::Button(label, ImVec2(w, h));
     ImGui::PopStyleColor(3);
     return c;
@@ -942,18 +942,27 @@ static std::string Brl(int cents) {
 
 static void ProductCard(const Product& p, const LicInfo& lic) {
     ImGui::PushID(p.slug.c_str());
+    ImVec2 cardMin = ImGui::GetCursorScreenPos();
     ImGui::PushStyleColor(ImGuiCol_ChildBg, COL_CARD2);
     ImGui::BeginChild("##pcard", ImVec2(0, 0), ImGuiChildFlags_Border | ImGuiChildFlags_AutoResizeY);
 
+    std::string price = p.variants.empty()
+        ? Brl(p.price_cents)
+        : "a partir de " + Brl(p.minPrice());
+    float pw = ImGui::CalcTextSize(price.c_str()).x + 18;
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    ImVec2 wpos = ImGui::GetWindowPos();
+    float wr = wpos.x + ImGui::GetWindowSize().x;
+    float wy = wpos.y + ImGui::GetStyle().WindowPadding.y;
+    float fh = ImGui::GetFontSize();
+    dl->AddRectFilled(ImVec2(wr - pw - 14, wy),
+                      ImVec2(wr - 14, wy + fh + 8),
+                      IM_COL32(33, 212, 189, 40), 9.0f);
+    dl->AddText(ImVec2(wr - pw - 5, wy + 4),
+                IM_COL32(140, 240, 220, 255), price.c_str());
+
     ImGui::PushFont(F_Med);
     ImGui::TextColored(COL_TEXT, "%s", p.name.c_str());
-    ImGui::PopFont();
-    ImGui::SameLine(ImGui::GetContentRegionAvail().x - 110);
-    ImGui::PushFont(F_Med);
-    if (!p.variants.empty())
-        ImGui::TextColored(COL_ACCENT, "a partir de %s", Brl(p.minPrice()).c_str());
-    else
-        ImGui::TextColored(COL_ACCENT, "%s", Brl(p.price_cents).c_str());
     ImGui::PopFont();
 
     ImGui::PushFont(F_Sm);
@@ -1027,6 +1036,12 @@ static void ProductCard(const Product& p, const LicInfo& lic) {
         }
     }
     ImGui::EndChild();
+    ImVec2 cardMax = ImGui::GetItemRectMax();
+    cardMin = ImGui::GetItemRectMin();
+    if (ImGui::IsMouseHoveringRect(cardMin, cardMax)) {
+        ImGui::GetWindowDrawList()->AddRect(
+            cardMin, cardMax, IM_COL32(33, 212, 189, 120), 10.0f, 0, 1.5f);
+    }
     ImGui::PopStyleColor();
     ImGui::PopID();
     ImGui::Dummy(ImVec2(0, 4));
@@ -1034,17 +1049,23 @@ static void ProductCard(const Product& p, const LicInfo& lic) {
 
 static bool NavTab(const char* label, int idx) {
     bool act = g.mainTab == idx;
-    if (act) {
-        ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.00f, 0.55f, 0.72f, 0.90f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.00f, 0.68f, 0.86f, 1.00f));
-        ImGui::PushStyleColor(ImGuiCol_Text,          ImVec4(1, 1, 1, 1));
-    } else {
-        ImGui::PushStyleColor(ImGuiCol_Button,        ImVec4(0.08f, 0.09f, 0.16f, 0.75f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.13f, 0.15f, 0.26f, 0.90f));
-        ImGui::PushStyleColor(ImGuiCol_Text,          ImVec4(0.62f, 0.66f, 0.74f, 1.00f));
-    }
-    bool c = ImGui::Button(label, ImVec2(-1, 42));
+    ImVec2 p = ImGui::GetCursorScreenPos();
+    float h = 40.0f;
+    if (act)
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(COL_ACCENT.x, COL_ACCENT.y, COL_ACCENT.z, 0.14f));
+    else
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(COL_ACCENT.x, COL_ACCENT.y, COL_ACCENT.z, 0.10f));
+    ImGui::PushStyleColor(ImGuiCol_Text, act ? COL_ACCENT : ImVec4(0.58f, 0.63f, 0.68f, 1.00f));
+    ImGui::PushStyleVar(ImGuiStyleVar_ButtonTextAlign, ImVec2(0.14f, 0.5f));
+    bool c = ImGui::Button(label, ImVec2(-1, h));
+    ImGui::PopStyleVar();
     ImGui::PopStyleColor(3);
+    if (act) {
+        ImGui::GetWindowDrawList()->AddRectFilled(
+            p, ImVec2(p.x + 3, p.y + h),
+            ImGui::ColorConvertFloat4ToU32(COL_ACCENT));
+    }
     if (c) g.mainTab = idx;
     return c;
 }
@@ -1171,7 +1192,7 @@ static void ScreenMain() {
     ImGui::TextColored(COL_ACCENT, "C4PT0R");
     ImGui::PopFont();
     ImGui::PushFont(F_Sm);
-    ImGui::TextColored(COL_DIM, "Loader v1.6");
+    ImGui::TextColored(COL_DIM, "Loader v2.0");
     ImGui::PopFont();
     ImGui::Separator();
     ImGui::Dummy(ImVec2(0, 6));
